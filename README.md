@@ -22,6 +22,8 @@
 - **Live times**: realtime NTA data marked *Live*, with the timetable as a fallback (*Timetable*)
 - **Favourites**: save your usual stops; they sit one Up press away at the top of Nearby, and load ahead of time
 - **Location refresh**: flick your wrist for a new fix. The header shows how old it is (*GPS now*, *GPS 3 min*)
+- **Bus tracking**: hold a bus and the watch buzzes hard 2 minutes before it arrives, even if you've closed the app
+- **Touch**: on the Time 2, swipe to scroll and tap to select; every action also works with buttons
 - **Easy to read**: large bold fonts and strong TFI yellow and green that hold up on the Time 2's display
 
 ## Controls
@@ -34,7 +36,10 @@
 | | **Flick wrist** | Refresh location |
 | | **Select** | Open the stop |
 | Departures | **Select** | Refresh times |
-| | **Hold Select** | Save or remove the favourite |
+| | **Hold Select** on a bus | Track it (hold another bus to move tracking, the same bus to stop) |
+| | **Select** on *★ Save stop* (last row) | Save or remove the favourite |
+| | **Tap ☆** (touch) | Save or remove the favourite |
+| Arrival alert | **Any button** | Dismiss |
 | Any | **Back** | Previous screen |
 
 ## Setup

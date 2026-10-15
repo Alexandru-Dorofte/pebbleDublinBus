@@ -8,7 +8,7 @@
 #define TFI_GREEN GColorIslamicGreen
 #define LIVE_FG GColorIslamicGreen
 
-typedef struct { char *route, *head, *due; bool live; } Bus;
+typedef struct { char *route, *head, *due; bool live, tracked; } Bus;
 typedef struct { char kind, *code, *name, *dist, *routes; bool fav; } Place;
 enum { PAGE_NEARBY, PAGE_FAVS };
 
@@ -86,6 +86,7 @@ static void parse_departures(const char *data) {
     b->head = field(&line);
     b->due = field(&line);
     b->live = field(&line)[0] == '1';
+    b->tracked = field(&line)[0] == '1';
   }
   s_loaded = true;
 }
@@ -175,12 +176,19 @@ static MenuLayer *s_dep_menu;
 static StatusBarLayer *s_dep_bar;
 static TextLayer *s_dep_status;
 static Layer *s_toast;
-static char s_toast_text[16];
+static char s_toast_text[64];  // "title \t subtitle"
 static AppTimer *s_toast_timer;
 
-static uint16_t dep_rows(MenuLayer *m, uint16_t section, void *ctx) { return s_nrows ? s_nrows : 1; }
+// Rows: the buses (or one "No buses"/"Loading" row), then "Save stop" once the stop has loaded,
+// so favourites work with buttons too; the header star is the touch shortcut.
+static int bus_rows(void) { return s_nrows ? s_nrows : 1; }
+static bool is_save_row(MenuIndex *i) { return s_loaded && i && i->row == bus_rows(); }
+static uint16_t dep_rows(MenuLayer *m, uint16_t section, void *ctx) { return bus_rows() + s_loaded; }
 static int16_t dep_header_height(MenuLayer *m, uint16_t section, void *ctx) { return 50; }
-static int16_t dep_cell_height(MenuLayer *m, MenuIndex *i, void *ctx) { return s_nrows ? 56 : 100; }
+static int16_t dep_cell_height(MenuLayer *m, MenuIndex *i, void *ctx) {
+  if (is_save_row(i)) return 46;
+  return s_nrows ? 56 : 100;
+}
 
 static void dep_header(GContext *ctx, const Layer *cell, uint16_t section, void *data) {
   GRect b = layer_get_bounds(cell);
@@ -208,6 +216,13 @@ static void draw_live(GContext *ctx, int x, int y, GColor c) {
 
 static void dep_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data) {
   GRect b = layer_get_bounds(cell);
+  if (is_save_row(i)) {
+    draw_star(ctx, GPoint(8, 12), 22, s_fav ? GColorBlack : TFI_GREEN, true);
+    graphics_context_set_text_color(ctx, GColorBlack);
+    text(ctx, s_fav ? "Remove favourite" : "Save stop", FONT_KEY_GOTHIC_24_BOLD, GRect(38, 6, b.size.w - 44, 30),
+         GTextAlignmentLeft);
+    return;
+  }
   graphics_context_set_text_color(ctx, GColorBlack);
   if (!s_nrows) {
     text(ctx, s_loaded ? "No buses" : "Loading…", FONT_KEY_GOTHIC_28_BOLD,
@@ -227,7 +242,12 @@ static void dep_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data) 
   graphics_context_set_text_color(ctx, GColorBlack);
   text(ctx, bus->head[0] ? bus->head : "Extra bus", FONT_KEY_GOTHIC_18_BOLD,
        GRect(54, 1, right - 56, 24), GTextAlignmentLeft);
-  if (bus->live) {
+  if (bus->tracked) {  // black tag, like the stop number, so it stands out from Live/Timetable
+    graphics_context_set_fill_color(ctx, GColorBlack);
+    graphics_fill_rect(ctx, GRect(54, 30, 70, 21), 3, GCornersAll);
+    graphics_context_set_text_color(ctx, GColorWhite);
+    text(ctx, "Tracking", FONT_KEY_GOTHIC_18_BOLD, GRect(54, 27, 70, 22), GTextAlignmentCenter);
+  } else if (bus->live) {
     draw_live(ctx, 54, 31, LIVE_FG);
     graphics_context_set_text_color(ctx, LIVE_FG);
     text(ctx, "Live", FONT_KEY_GOTHIC_18_BOLD, GRect(69, 26, 60, 22), GTextAlignmentLeft);
@@ -255,26 +275,39 @@ static void dep_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data) 
 }
 
 static void dep_refresh(MenuLayer *m, MenuIndex *i, void *ctx) {
+  if (is_save_row(i)) return send_kv(MESSAGE_KEY_FAV, s_open_code);
   send_kv(MESSAGE_KEY_REFRESH, NULL);
   strncpy(s_updated, "…", sizeof(s_updated) - 1);
   menu_layer_reload_data(s_dep_menu);
   vibes_short_pulse();
 }
 
-static void dep_toggle_fav(MenuLayer *m, MenuIndex *i, void *ctx) {
-  send_kv(MESSAGE_KEY_FAV, s_open_code);
+// Hold a bus (button or finger): track it, move tracking to it, or stop tracking it.
+static void track_row(int row) {
+  static time_t last;
+  if (row < 0 || row >= s_nrows || time(NULL) - last < 2) return;  // touch and the button bridge can both fire
+  last = time(NULL);
+  char n[8];
+  snprintf(n, sizeof(n), "%d", row);
+  send_kv(MESSAGE_KEY_TRACK, n);
 }
+
+static void dep_hold(MenuLayer *m, MenuIndex *i, void *ctx) { track_row(i->row); }
 
 static void toast_draw(Layer *l, GContext *ctx) {
   GRect b = layer_get_bounds(l);
-  bool saved = s_toast_text[0] == 'S';
+  char title[64];
+  strncpy(title, s_toast_text, sizeof(title) - 1);
+  title[sizeof(title) - 1] = '\0';
+  char *rest = title, *head = cut(&rest, '\t'), *sub = rest ? rest : "";
+  bool fav = strstr(sub, "favourites") != NULL, saved = fav && head[0] == 'S';
+  int x = fav ? 42 : 10;
   graphics_context_set_fill_color(ctx, GColorBlack);
   graphics_fill_rect(ctx, b, 6, GCornersAll);
-  draw_star(ctx, GPoint(10, 14), 24, saved ? GColorSpringBud : GColorWhite, saved);
+  if (fav) draw_star(ctx, GPoint(10, 14), 24, saved ? GColorSpringBud : GColorWhite, saved);
   graphics_context_set_text_color(ctx, GColorWhite);
-  text(ctx, s_toast_text, FONT_KEY_GOTHIC_24_BOLD, GRect(42, 0, b.size.w - 48, 28), GTextAlignmentLeft);
-  text(ctx, saved ? "to favourites" : "from favourites", FONT_KEY_GOTHIC_18, GRect(42, 26, b.size.w - 48, 22),
-       GTextAlignmentLeft);
+  text(ctx, head, FONT_KEY_GOTHIC_24_BOLD, GRect(x, 0, b.size.w - x - 6, 28), GTextAlignmentLeft);
+  text(ctx, sub, FONT_KEY_GOTHIC_18, GRect(x, 26, b.size.w - x - 6, 22), GTextAlignmentLeft);
 }
 
 static void toast_hide(void *ctx) {
@@ -288,8 +321,54 @@ static void show_toast(const char *msg) {
   layer_set_hidden(s_toast, false);
   layer_mark_dirty(s_toast);
   if (s_toast_timer) app_timer_cancel(s_toast_timer);
-  s_toast_timer = app_timer_register(1500, toast_hide, NULL);
+  s_toast_timer = app_timer_register(2500, toast_hide, NULL);
   vibes_short_pulse();
+}
+
+// Touch on the stop screen: tap the star to save/remove the stop, hold a bus to track it.
+// Scrolling and taps on rows still come from the system touch navigation.
+static GPoint s_touch_at;
+static bool s_touch_moved, s_touch_held;
+static AppTimer *s_hold_timer;
+
+static int dep_scroll_y(void) {  // 0 at the top, negative once scrolled
+  return scroll_layer_get_content_offset(menu_layer_get_scroll_layer(s_dep_menu)).y;
+}
+
+static void touch_hold(void *ctx) {
+  s_hold_timer = NULL;
+  s_touch_held = true;
+  int y = s_touch_at.y - STATUS_BAR_LAYER_HEIGHT - dep_scroll_y() - dep_header_height(NULL, 0, NULL);
+  if (y >= 0 && s_nrows) track_row(y / dep_cell_height(NULL, NULL, NULL));
+}
+
+static void dep_touch(const TouchEvent *e, void *ctx) {
+  if (e->non_navigational || !s_dep_menu) return;
+  GPoint p = GPoint(e->x, e->y);
+  if (e->type == TouchEvent_Touchdown) {
+    s_touch_at = p, s_touch_moved = s_touch_held = false;
+    s_hold_timer = app_timer_register(600, touch_hold, NULL);
+    return;
+  }
+  if (abs(p.x - s_touch_at.x) > 10 || abs(p.y - s_touch_at.y) > 10) s_touch_moved = true;
+  if ((s_touch_moved || e->type == TouchEvent_Liftoff) && s_hold_timer) {
+    app_timer_cancel(s_hold_timer);
+    s_hold_timer = NULL;
+  }
+  if (e->type != TouchEvent_Liftoff || s_touch_moved || s_touch_held) return;
+  int top = STATUS_BAR_LAYER_HEIGHT + dep_scroll_y();  // header scrolls with the list
+  int w = layer_get_bounds(window_get_root_layer(s_dep_window)).size.w;
+  if (p.x >= w - 40 && p.y >= top && p.y < top + 48) send_kv(MESSAGE_KEY_FAV, s_open_code);
+}
+
+static void dep_appear(Window *w) {
+  if (touch_service_is_enabled()) touch_service_subscribe(dep_touch, NULL);
+}
+
+static void dep_disappear(Window *w) {
+  touch_service_unsubscribe();  // touch sensor off when not needed
+  if (s_hold_timer) app_timer_cancel(s_hold_timer);
+  s_hold_timer = NULL;
 }
 
 static void dep_load(Window *w) {
@@ -300,7 +379,7 @@ static void dep_load(Window *w) {
   s_dep_menu = add_menu(w, root, NULL, (MenuLayerCallbacks){
     .get_num_rows = dep_rows, .get_header_height = dep_header_height, .draw_header = dep_header,
     .get_cell_height = dep_cell_height, .draw_row = dep_row,
-    .select_click = dep_refresh, .select_long_click = dep_toggle_fav,
+    .select_click = dep_refresh, .select_long_click = dep_hold,
   });
   s_dep_status = text_layer_create(GRect(10, b.size.h / 2 - 40, b.size.w - 20, 90));
   text_layer_set_background_color(s_dep_status, GColorClear);
@@ -513,6 +592,103 @@ static void list_unload(Window *w) {
   s_list_menu[page] = NULL;
 }
 
+// ---- Tracked bus: full-screen alert and wake-up ----
+
+enum { P_TRACK_CODE = 1, P_TRACK_AT = 2 };  // persist keys: tracked stop, its predicted arrival
+#define WAKE_EARLY (5 * 60)  // reopen the app this long before a tracked bus is due
+
+static Window *s_alert_window;
+static char s_alert_buf[128];
+static char *s_al_route = "", *s_al_head = "", *s_al_stop = "", *s_al_due = "";
+static AppTimer *s_buzz_timer;
+static int s_buzzes;
+static bool s_woken;  // the watch opened the app for a tracked bus
+
+// Long pulses are the strongest the vibration motor gives; repeat with the light on until dismissed.
+static void buzz(void *ctx) {
+  static const uint32_t seg[] = {800, 250, 800, 250, 1200};
+  vibes_enqueue_custom_pattern((VibePattern){.durations = seg, .num_segments = ARRAY_LENGTH(seg)});
+  light_enable_interaction();
+  s_buzz_timer = ++s_buzzes < 5 ? app_timer_register(6000, buzz, NULL) : NULL;
+}
+
+static void alert_draw(Layer *l, GContext *ctx) {
+  GRect b = layer_get_bounds(l);
+  graphics_context_set_fill_color(ctx, TFI_GREEN);
+  graphics_fill_rect(ctx, b, 0, GCornerNone);
+  char line[32];
+  if (!strcmp(s_al_due, "Due")) snprintf(line, sizeof(line), "Due now");
+  else snprintf(line, sizeof(line), "Arriving in %s", s_al_due);
+  graphics_context_set_text_color(ctx, GColorWhite);
+  text(ctx, s_al_route, FONT_KEY_BITHAM_42_BOLD, GRect(0, 34, b.size.w, 50), GTextAlignmentCenter);
+  wrap(ctx, line, FONT_KEY_GOTHIC_28_BOLD, GRect(6, 92, b.size.w - 12, 64));
+  wrap(ctx, s_al_stop, FONT_KEY_GOTHIC_18_BOLD, GRect(6, 158, b.size.w - 12, 24));
+  wrap(ctx, s_al_head, FONT_KEY_GOTHIC_18, GRect(6, 182, b.size.w - 12, 24));
+}
+
+static void alert_dismiss(ClickRecognizerRef r, void *ctx) {
+  if (s_woken) window_stack_pop_all(true);  // opened just for this bus: close again to save battery
+  else window_stack_remove(s_alert_window, true);
+}
+
+static void alert_clicks(void *ctx) {
+  for (int b = BUTTON_ID_BACK; b < NUM_BUTTONS; b++) window_single_click_subscribe(b, alert_dismiss);
+}
+
+static void alert_load(Window *w) {
+  Layer *root = window_get_root_layer(w);
+  layer_set_update_proc(root, alert_draw);
+  window_set_click_config_provider(w, alert_clicks);
+}
+
+static void alert_unload(Window *w) {
+  if (s_buzz_timer) app_timer_cancel(s_buzz_timer);
+  s_buzz_timer = NULL;
+  vibes_cancel();
+}
+
+// ALERT "route \t headsign \t stop name \t due" from the phone.
+static void show_alert(const char *data) {
+  strncpy(s_alert_buf, data, sizeof(s_alert_buf) - 1);
+  char *rest = s_alert_buf;
+  s_al_route = field(&rest), s_al_head = field(&rest), s_al_stop = field(&rest), s_al_due = field(&rest);
+  if (!s_alert_window) {
+    s_alert_window = window_create();
+    window_set_window_handlers(s_alert_window, (WindowHandlers){.load = alert_load, .unload = alert_unload});
+  }
+  if (!window_stack_contains_window(s_alert_window)) window_stack_push(s_alert_window, true);
+  layer_mark_dirty(window_get_root_layer(s_alert_window));
+  if (s_buzz_timer) app_timer_cancel(s_buzz_timer);
+  s_buzzes = 0;
+  buzz(NULL);
+}
+
+// WAKE "code \t epoch s" while a bus is tracked, "" when tracking ends.
+static void save_track(const char *data) {
+  char buf[32];
+  strncpy(buf, data, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+  char *rest = buf, *code = field(&rest), *at = field(&rest);
+  if (!code[0]) {
+    persist_delete(P_TRACK_CODE);
+    persist_delete(P_TRACK_AT);
+    return;
+  }
+  persist_write_string(P_TRACK_CODE, code);
+  persist_write_int(P_TRACK_AT, atoi(at));
+}
+
+// On exit: if a tracked bus is still on its way, have the watch reopen the app shortly before it's due.
+// The app then polls (still once a minute at most) and buzzes; nothing runs while it's closed.
+static void schedule_wake(void) {
+  wakeup_cancel_all();
+  if (!persist_exists(P_TRACK_AT)) return;
+  time_t due = persist_read_int(P_TRACK_AT), now = time(NULL);
+  if (due - now < 3 * 60) return;  // too close to wake up in time
+  time_t at = due - WAKE_EARLY;
+  wakeup_schedule(at > now + 60 ? at : now + 60, 0, true);
+}
+
 // ---- AppMessage ----
 
 static void inbox(DictionaryIterator *it, void *ctx) {
@@ -547,6 +723,8 @@ static void inbox(DictionaryIterator *it, void *ctx) {
     window_set_background_color(s_dep_window, TFI_YELLOW);
   }
   if ((t = dict_find(it, MESSAGE_KEY_TOAST)) && on_dep) show_toast(t->value->cstring);
+  if ((t = dict_find(it, MESSAGE_KEY_WAKE))) save_track(t->value->cstring);
+  if ((t = dict_find(it, MESSAGE_KEY_ALERT))) show_alert(t->value->cstring);
 }
 
 int main(void) {
@@ -557,11 +735,22 @@ int main(void) {
         .load = list_load, .appear = list_appear, .disappear = list_disappear, .unload = list_unload});
   }
   s_dep_window = window_create();
-  window_set_window_handlers(s_dep_window, (WindowHandlers){.load = dep_load, .unload = dep_unload});
+  window_set_window_handlers(s_dep_window, (WindowHandlers){
+      .load = dep_load, .appear = dep_appear, .disappear = dep_disappear, .unload = dep_unload});
   app_message_register_inbox_received(inbox);
   app_message_open(sizeof(s_home_buf) + 64, 64);
+  app_touch_navigation_enable(true);  // Time 2 touchscreen: the system turns swipes/taps on lists into button presses
   window_stack_push(s_list_window[PAGE_NEARBY], true);
+  wakeup_cancel_all();  // the app is open now; schedule_wake() sets it again on exit
+  char code[8];
+  if (launch_reason() == APP_LAUNCH_WAKEUP && persist_read_string(P_TRACK_CODE, code, sizeof(code)) > 0) {
+    Place p = {.kind = 'F', .code = code, .name = "Tracked bus", .dist = "", .routes = "", .fav = false};
+    s_woken = true;
+    open_stop(&p);  // straight to the tracked bus's stop
+  }
   app_event_loop();
+  schedule_wake();
+  if (s_alert_window) window_destroy(s_alert_window);
   window_destroy(s_dep_window);
   for (int p = 0; p < 2; p++) window_destroy(s_list_window[p]);
 }

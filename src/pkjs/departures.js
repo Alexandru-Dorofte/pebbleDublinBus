@@ -77,14 +77,15 @@ function forStop(data, stop, feed, now) {
       tu = tu || idx.byKey[[route[0], t[7], day, t[6]].join('|')];
       if (tu) used.push(tu);
       var p = predict(tu, t[5], sched);
-      if (p) out.push({ route: route[1], head: data.heads[t[2]], ms: p.ms, live: p.live });
+      if (p) out.push({ id: t[4] + '|' + day, route: route[1], head: data.heads[t[2]], ms: p.ms, live: p.live });
     });
   });
   idx.added.forEach(function (tu) {
     if (used.indexOf(tu) >= 0) return; // already shown as its timetabled trip
     (tu.stop_time_update || []).forEach(function (u) {
       if (u.stop_id !== stop.id || !ev(u).time || u.schedule_relationship === 'SKIPPED') return;
-      out.push({ route: data.allRoutes[tu.trip.route_id] || '?', head: '', ms: +ev(u).time * 1000, live: true });
+      out.push({ id: tu.trip.trip_id + '|' + tu.trip.start_date, route: data.allRoutes[tu.trip.route_id] || '?', head: '',
+                 ms: +ev(u).time * 1000, live: true });
     });
   });
   return out

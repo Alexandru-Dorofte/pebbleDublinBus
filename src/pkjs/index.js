@@ -8,6 +8,7 @@ var NEARBY_M = 1000, NEARBY_MAX = 10, MAX_FAVS = 12;
 var FAV_DAYS = 6;          // favourites' timetables kept on the phone (files cover 8 days)
 var TICK = 20 * 1000;     // recount minutes; MIN_GAP still limits API calls
 var STALE = 3 * 60 * 1000; // keep using the last good feed this long if a fetch fails
+var ALERT_MS = 2 * 60 * 1000; // buzz this long before a tracked bus arrives
 var DEFAULT_FAVS = ['4766'];
 
 var feed = null, feedAt = 0, busy = false;
@@ -19,6 +20,7 @@ var here = null;          // {lat, lon, t}, 'off', 'nofix', or null while locati
 var current = null;       // stop code open on the watch
 var lastSent = '';        // last DATA sent, to skip identical updates (saves Bluetooth)
 var timetables = {};      // code -> stop file, for this session
+var lastBuses = [];       // buses in the last DATA, so a row number from the watch finds its bus
 
 function store(k, v) {
   try {
@@ -37,14 +39,31 @@ function favs() {
   try { return JSON.parse(store('favs')) || DEFAULT_FAVS.slice(); } catch (e) { return DEFAULT_FAVS.slice(); }
 }
 
+// The one tracked bus: {stop, id, ms} (ms = latest predicted arrival), or null. Kept on the phone
+// so tracking survives the app closing and being woken by the watch.
+function track(v) {
+  if (v === undefined) { try { return JSON.parse(store('track')); } catch (e) { return null; } }
+  store('track', v ? JSON.stringify(v) : '');
+}
+
 function today() {
   var d = new Date();
   return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
 }
 
-function send(msg, retried) {
-  Pebble.sendAppMessage(msg, null, function () {
-    if (!retried) setTimeout(function () { send(msg, true); }, 500); // watch busy: one retry
+// One message at a time, in order: the watch can't take a second while it handles one, and an
+// ALERT must not be lost behind a DATA update. Up to 4 tries each, 0.5 s apart.
+var outbox = [];
+function send(msg) {
+  outbox.push(msg);
+  if (outbox.length === 1) pump(0);
+}
+function pump(tries) {
+  if (!outbox.length) return;
+  Pebble.sendAppMessage(outbox[0], function () { outbox.shift(); pump(0); }, function () {
+    if (tries < 3) return setTimeout(function () { pump(tries + 1); }, 500);
+    outbox.shift(); // watch gone (app closed): drop it and carry on
+    pump(0);
   });
 }
 
@@ -155,13 +174,54 @@ function loadIndex() {
 }
 
 // Departures for the open stop. Header line: name \t code \t distance \t fav(1/0); then
-// one line per bus: route \t headsign \t due \t live(1/0).
+// one line per bus: route \t headsign \t due \t live(1/0) \t tracked(1/0).
 function render() {
-  var t = timetables[current], now = Date.now(), s = t.stops[0];
+  var t = timetables[current], now = Date.now(), s = t.stops[0], tr = track();
   var head = [s.name, s.code, stopDist(current), favs().indexOf(current) >= 0 ? 1 : 0].join('\t');
-  return [head].concat(dep.forStop(t, s, feed, now).map(function (b) {
-    return [b.route, b.head, dep.due(b.ms, now), b.live ? 1 : 0].join('\t');
+  lastBuses = dep.forStop(t, s, feed, now);
+  return [head].concat(lastBuses.map(function (b) {
+    var tracked = tr && tr.stop === current && tr.id === b.id;
+    return [b.route, b.head, dep.due(b.ms, now), b.live ? 1 : 0, tracked ? 1 : 0].join('\t');
   })).join('\n');
+}
+
+// Tracked bus: ALERT the watch once it is ALERT_MS away; until then keep the watch told when
+// it's due (WAKE "code \t epoch s"), so the watch can wake the app if the user closes it.
+// Uses whatever feed the 60 s-limited refresh already has: tracking makes no extra API calls.
+function checkTrack() {
+  var tr = track(), t = tr && timetables[tr.stop], now = Date.now();
+  if (!t) return; // loaded once the watch opens the stop (it does on a wake-up)
+  var b = dep.forStop(t, t.stops[0], feed, now).filter(function (x) { return x.id === tr.id; })[0];
+  if (!b) { if (now > tr.ms) { track(null); send({ WAKE: '' }); } return; } // gone by or cancelled
+  if (b.ms - now <= ALERT_MS) {
+    track(null);
+    return send({ WAKE: '', ALERT: [b.route, b.head, t.stops[0].name, dep.due(b.ms, now)].join('\t') });
+  }
+  if (!tr.told || Math.abs(b.ms - tr.ms) >= 30000) {
+    tr.ms = b.ms, tr.told = 1;
+    track(tr);
+    send({ WAKE: tr.stop + '\t' + Math.round(b.ms / 1000) });
+  }
+}
+
+// Hold on a bus: track it; on another bus: move tracking there; on the tracked bus: stop.
+function toggleTrack(row) {
+  var b = lastBuses[row], tr = track();
+  if (!b || !current) return;
+  if (tr && tr.id === b.id) {
+    track(null);
+    send({ WAKE: '', TOAST: 'Stopped\ttracking the ' + b.route });
+  } else {
+    track({ stop: current, id: b.id, ms: b.ms });
+    send({ TOAST: 'Tracking ' + b.route + '\tBuzz 2 min before it arrives' });
+  }
+  lastSent = '';
+  update();
+}
+
+function update() {
+  checkTrack(); // first, so the list never shows a bus as tracked after its alert
+  if (current && timetables[current]) sendData();
 }
 
 function sendData() {
@@ -187,16 +247,21 @@ function fetchFeed(done) {
   return true;
 }
 
+// Runs every TICK while a stop is open or a bus is tracked; the API itself is called at most
+// once per MIN_GAP (fetchFeed), so on Nearby/Favourites with nothing tracked nothing happens.
 function refresh() {
-  if (!current || !timetables[current]) return;
+  var tr = track(), showing = current && timetables[current];
+  if (!showing && !(tr && timetables[tr.stop])) return;
   if (feed && Date.now() - feedAt > STALE) feed = null;
-  if (!key()) return send({ STATUS: 'Add your NTA API key in the app settings on your phone' });
+  if (!key()) {
+    checkTrack(); // timetable only
+    return showing && send({ STATUS: 'Add your NTA API key in the app settings on your phone' });
+  }
   var calling = fetchFeed(function (err) {
-    if (!current || !timetables[current]) return; // user left, or the stop's timetable is still loading
-    if (err === 401 || err === 403) return send({ STATUS: 'NTA API key rejected. Check settings' });
-    sendData();
+    if ((err === 401 || err === 403) && current) return send({ STATUS: 'NTA API key rejected. Check settings' });
+    update();
   });
-  if (!calling && !busy) sendData(); // inside the 60 s gap: recount minutes, no call
+  if (!calling && !busy) update(); // inside the 60 s gap: recount minutes, no call
 }
 
 function open(code) {
@@ -220,7 +285,7 @@ function toggleFav(code) {
   store('favs', JSON.stringify(f));
   if (i >= 0) { try { localStorage.removeItem('c:s/' + code + '.json'); } catch (e) {} } // free the space
   else if (timetables[code]) store('c:s/' + code + '.json', JSON.stringify({ day: today(), at: Date.now(), data: timetables[code] }));
-  var msg = { TOAST: i >= 0 ? 'Removed' : 'Saved' };
+  var msg = { TOAST: i >= 0 ? 'Removed\tfrom favourites' : 'Saved\tto favourites' };
   if (current === code && timetables[code]) msg.DATA = lastSent = render();
   send(msg);
   sendHome();
@@ -231,7 +296,7 @@ function warm() {
   favs().forEach(function (code) {
     if (!timetables[code]) cached('s/' + code + '.json', FAV_DAYS, function (err, data) { if (!err) timetables[code] = data; });
   });
-  fetchFeed(function () { if (current && timetables[current]) sendData(); }); // a stop opened meanwhile
+  fetchFeed(update); // a stop opened meanwhile
 }
 
 Pebble.addEventListener('ready', function () {
@@ -246,6 +311,7 @@ Pebble.addEventListener('appmessage', function (e) {
   var p = e.payload;
   if (p.OPEN !== undefined) open(String(p.OPEN));
   if (p.FAV !== undefined) toggleFav(String(p.FAV));
+  if (p.TRACK !== undefined) toggleTrack(+p.TRACK);
   if (p.REFRESH !== undefined) { lastSent = ''; refresh(); } // watch shows "…" until it hears back
   if (p.HOME !== undefined) locate(true); // flick or Up on Nearby: new fix now
   if (p.CLOSE !== undefined) { current = null; locate(); } // back on the home screen: re-check location
