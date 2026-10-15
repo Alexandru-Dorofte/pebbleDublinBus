@@ -236,7 +236,7 @@ Pebble.addEventListener('showConfiguration', function () {
     return { code: code, name: s ? s[1] : '', routes: s ? s[4] : '' };
   });
   var k = key(), st = keyStatus();
-  var keyInfo = k ? { last4: k.slice(-4), status: st || 'checking' } : null;
+  var keyInfo = k ? { full: k, last4: k.slice(-4), status: st || 'checking' } : null; // page runs only on your phone
   var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<style>body{font-family:-apple-system,Roboto,sans-serif;margin:0;background:#f4f4f4;color:#111}' +
     'header{background:#018555;color:#fff;padding:16px;font-size:20px;font-weight:bold}main{padding:16px}' +
@@ -244,9 +244,9 @@ Pebble.addEventListener('showConfiguration', function () {
     '.row{display:flex;align-items:center;gap:8px;background:#fff;border-radius:6px;padding:10px;margin:6px 0}.row div{flex:1}' +
     '.row small{color:#555;display:block}button{font-size:15px;border:0;border-radius:6px;padding:10px 14px;font-weight:bold}' +
     '.rm{background:#eee}.add{background:#018555;color:#fff}.save{background:#FFE600;width:100%;margin-top:24px;font-size:17px;padding:14px}' +
-    'p{color:#555;font-size:13px}.key{font-family:monospace;font-size:17px;letter-spacing:1px}' +
+    'p{color:#555;font-size:13px}.key{font-family:monospace;font-size:17px;letter-spacing:1px;word-break:break-all}' +
     '.badge{display:inline-block;margin-top:4px;font-size:14px;font-weight:bold}.ok{color:#018555}.bad{color:#c62828}.checking{color:#555}' +
-    '.x{background:#eee;font-size:20px;padding:6px 14px}</style></head><body><header>Dublin Bus</header><main>' +
+    '.x{background:#eee;font-size:20px;padding:6px 12px}</style></head><body><header>Dublin Bus</header><main>' +
     '<h3>NTA API key</h3><div id="keybox"></div>' +
     '<p>Free from developer.nationaltransport.ie. Saved on your phone only.</p>' +
     '<h3>Favourite stops</h3><div id="favs"></div>' +
@@ -260,7 +260,14 @@ Pebble.addEventListener('showConfiguration', function () {
     'function draw(){document.getElementById("favs").innerHTML=favs.map(function(f,i){return "<div class=row><div><b>"+e(f.name||"Stop "+f.code)+"</b><small>"+e(f.code)+(f.routes?" · "+e(f.routes):"")+"</small></div><button class=rm onclick=\\"rm("+i+")\\">Remove</button></div>"}).join("")||"<p>No favourites yet.</p>"}' +
     'function rm(i){favs.splice(i,1);draw()}' +
     'var badges={ok:"✓ Working",bad:"✗ Rejected. Check the key",checking:"Checking… (open a stop on your watch)"};' +
-    'function drawKey(){document.getElementById("keybox").innerHTML=keyInfo?"<div class=row><div><span class=key>•••• •••• "+e(keyInfo.last4)+"</span><br><span class=\\"badge "+keyInfo.status+"\\">"+badges[keyInfo.status]+"</span></div><button class=x onclick=\\"clearKey=true;keyInfo=null;drawKey()\\">✕</button></div>":"<input id=k type=password autocomplete=off placeholder=\\"Paste your API key\\">"}' +
+    'var shown=false;' +
+    'function drawKey(){document.getElementById("keybox").innerHTML=keyInfo?"<div class=row><div><span id=kv class=key>"+(shown?e(keyInfo.full):"•••• •••• "+e(keyInfo.last4))+"</span><br><span class=\\"badge "+keyInfo.status+"\\">"+badges[keyInfo.status]+"</span><span id=cp class=badge></span></div>"+' +
+    '"<button class=x aria-label=\\"Show key\\" onclick=\\"shown=!shown;drawKey()\\">"+(shown?"🙈":"👁")+"</button>"+(shown?"<button class=x onclick=\\"copyKey()\\">Copy</button>":"")+' +
+    '"<button class=x aria-label=\\"Remove key\\" onclick=\\"clearKey=true;keyInfo=null;drawKey()\\">✕</button></div>":"<input id=k type=password autocomplete=off placeholder=\\"Paste your API key\\">"}' +
+    'function copyKey(){var done=function(){document.getElementById("cp").textContent="  Copied"};' +
+    'if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(keyInfo.full).then(done,sel)}else sel();' +
+    'function sel(){var r=document.createRange();r.selectNodeContents(document.getElementById("kv"));var s=window.getSelection();s.removeAllRanges();s.addRange(r);' +
+    'try{if(document.execCommand("copy"))return done()}catch(x){}document.getElementById("cp").textContent="  Selected, tap and hold to copy"}}' +
     'function add(){var n=document.getElementById("n").value.replace(/\\D/g,"");if(n&&!favs.some(function(f){return f.code==n}))favs.push({code:n});document.getElementById("n").value="";draw()}' +
     'function save(){var k=document.getElementById("k");location.href="pebblejs://close#"+encodeURIComponent(JSON.stringify({key:k?k.value.trim():"",clearKey:clearKey,favs:favs.map(function(f){return f.code})}))}' +
     'draw();drawKey()</script></body></html>';
