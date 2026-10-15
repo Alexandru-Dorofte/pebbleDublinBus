@@ -1,0 +1,5 @@
+build/
+.lock-waf*
+node_modules/
+.env
+src/pkjs/env.json
