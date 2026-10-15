@@ -1,11 +1,11 @@
 # pebbleDublinBus
 
-Next buses at Dublin stops, on a Pebble Time 2 (emery). Pebble Round 2 (gabbro) builds too.
+Next buses at Dublin stops, on a Pebble Time 2, with large, high-contrast text.
 
 ## Features
 
 - **Nearby**: the 10 closest stops within 1 km, from your phone's GPS. A **★ Favourites** row at the end opens your saved stops
-- **Departures**: Select opens a stop. Live NTA GTFS-Realtime times (*Live*), with the timetable as fallback (*Scheduled*)
+- **Departures**: Select opens a stop. Live NTA GTFS-Realtime times (*Live*), with the timetable as fallback (*Timetable*)
 - **Favourites**: long-press Select on a stop to save or remove it, or manage them in the phone settings
 - **Timetables**: built nightly by `.github/workflows/site.yml` (`build_site.py`) and hosted on
   [GitHub Pages](https://alexandru-dorofte.github.io/pebbleDublinBus/). The phone downloads only the stop you open

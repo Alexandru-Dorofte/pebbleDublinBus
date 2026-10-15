@@ -164,22 +164,22 @@ static char s_toast_text[16];
 static AppTimer *s_toast_timer;
 
 static uint16_t dep_rows(MenuLayer *m, uint16_t section, void *ctx) { return s_nrows ? s_nrows : 1; }
-static int16_t dep_header_height(MenuLayer *m, uint16_t section, void *ctx) { return 38; }
-static int16_t dep_cell_height(MenuLayer *m, MenuIndex *i, void *ctx) { return s_nrows ? 42 : 84; }
+static int16_t dep_header_height(MenuLayer *m, uint16_t section, void *ctx) { return 50; }
+static int16_t dep_cell_height(MenuLayer *m, MenuIndex *i, void *ctx) { return s_nrows ? 56 : 100; }
 
 static void dep_header(GContext *ctx, const Layer *cell, uint16_t section, void *data) {
   GRect b = layer_get_bounds(cell);
   graphics_context_set_fill_color(ctx, TFI_YELLOW);
   graphics_fill_rect(ctx, b, 0, GCornerNone);
   graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_fill_rect(ctx, GRect(0, 36, b.size.w, 2), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(0, 47, b.size.w, 3), 0, GCornerNone);
   char sub[64];
-  if (s_dist[0]) snprintf(sub, sizeof(sub), "Stop %s · %s · %s", s_code, s_dist, s_updated);
-  else snprintf(sub, sizeof(sub), "Stop %s · %s", s_code, s_updated);
+  if (s_dist[0]) snprintf(sub, sizeof(sub), "%s · %s · %s", s_code, s_dist, s_updated);
+  else snprintf(sub, sizeof(sub), "%s · %s", s_code, s_updated);
   graphics_context_set_text_color(ctx, GColorBlack);
-  text(ctx, s_name, FONT_KEY_GOTHIC_18_BOLD, GRect(6, -1, b.size.w - 34, 22), GTextAlignmentLeft);
-  text(ctx, sub, FONT_KEY_GOTHIC_14, GRect(6, 17, b.size.w - 12, 18), GTextAlignmentLeft);
-  draw_star(ctx, GPoint(b.size.w - 22, 10), 16, GColorBlack, s_fav);
+  text(ctx, s_name, FONT_KEY_GOTHIC_24_BOLD, GRect(6, -4, b.size.w - 34, 28), GTextAlignmentLeft);
+  text(ctx, sub, FONT_KEY_GOTHIC_18_BOLD, GRect(6, 22, b.size.w - 12, 22), GTextAlignmentLeft);
+  draw_star(ctx, GPoint(b.size.w - 24, 12), 18, GColorBlack, s_fav);
 }
 
 // Dot plus two signal arcs, 11x11, top-left at (x, y).
@@ -195,54 +195,53 @@ static void dep_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data) 
   GRect b = layer_get_bounds(cell);
   graphics_context_set_text_color(ctx, GColorBlack);
   if (!s_nrows) {
-    text(ctx, s_loaded ? "No buses" : "Loading timetable…", FONT_KEY_GOTHIC_24_BOLD,
-         GRect(8, 14, b.size.w - 16, 28), GTextAlignmentCenter);
-    graphics_context_set_text_color(ctx, GColorDarkGray);
-    text(ctx, s_loaded ? "in the next 90 min" : "Getting live times", FONT_KEY_GOTHIC_18,
-         GRect(8, 42, b.size.w - 16, 24), GTextAlignmentCenter);
+    text(ctx, s_loaded ? "No buses" : "Loading…", FONT_KEY_GOTHIC_28_BOLD,
+         GRect(8, 16, b.size.w - 16, 34), GTextAlignmentCenter);
+    text(ctx, s_loaded ? "in the next 90 min" : "Getting live times", FONT_KEY_GOTHIC_18_BOLD,
+         GRect(8, 52, b.size.w - 16, 24), GTextAlignmentCenter);
     return;
   }
   Bus *bus = &s_rows[i->row];
   int right = b.size.w - 54;  // due column
 
   graphics_context_set_fill_color(ctx, TFI_GREEN);
-  graphics_fill_rect(ctx, GRect(4, 9, 42, 24), 3, GCornersAll);
+  graphics_fill_rect(ctx, GRect(3, 11, 46, 32), 4, GCornersAll);
   graphics_context_set_text_color(ctx, GColorWhite);
-  text(ctx, bus->route, FONT_KEY_GOTHIC_18_BOLD, GRect(4, 10, 42, 22), GTextAlignmentCenter);
+  text(ctx, bus->route, FONT_KEY_GOTHIC_24_BOLD, GRect(3, 12, 46, 30), GTextAlignmentCenter);
 
   graphics_context_set_text_color(ctx, GColorBlack);
-  text(ctx, bus->head[0] ? bus->head : "Extra bus", FONT_KEY_GOTHIC_18, GRect(52, 0, right - 54, 22), GTextAlignmentLeft);
+  text(ctx, bus->head[0] ? bus->head : "Extra bus", FONT_KEY_GOTHIC_18_BOLD,
+       GRect(54, 1, right - 56, 24), GTextAlignmentLeft);
   if (bus->live) {
-    draw_live(ctx, 52, 24, LIVE_FG);
+    draw_live(ctx, 54, 31, LIVE_FG);
     graphics_context_set_text_color(ctx, LIVE_FG);
-    text(ctx, "Live", FONT_KEY_GOTHIC_14_BOLD, GRect(66, 20, 60, 18), GTextAlignmentLeft);
+    text(ctx, "Live", FONT_KEY_GOTHIC_18_BOLD, GRect(69, 26, 60, 22), GTextAlignmentLeft);
   } else {
-    graphics_context_set_text_color(ctx, GColorDarkGray);
-    text(ctx, "Scheduled", FONT_KEY_GOTHIC_14, GRect(52, 20, 90, 18), GTextAlignmentLeft);
+    text(ctx, "Timetable", FONT_KEY_GOTHIC_18, GRect(54, 26, 90, 22), GTextAlignmentLeft);
   }
 
-  // "N min" -> big number over small "min"; "Due" and "HH:MM" as one line.
-  graphics_context_set_text_color(ctx, bus->live ? GColorBlack : GColorDarkGray);
+  // "N min" -> big number over "min"; "Due" and "HH:MM" as one line.
+  graphics_context_set_text_color(ctx, GColorBlack);
   char *sp = strchr(bus->due, ' ');
   if (sp) {
     char num[4];
     int len = sp - bus->due < 3 ? sp - bus->due : 3;
     memcpy(num, bus->due, len);
     num[len] = '\0';
-    text(ctx, num, FONT_KEY_GOTHIC_24_BOLD, GRect(right, -4, 50, 28), GTextAlignmentRight);
-    text(ctx, "min", FONT_KEY_GOTHIC_14, GRect(right, 20, 50, 18), GTextAlignmentRight);
+    text(ctx, num, FONT_KEY_GOTHIC_28_BOLD, GRect(right, -6, 50, 32), GTextAlignmentRight);
+    text(ctx, "min", FONT_KEY_GOTHIC_18_BOLD, GRect(right, 26, 50, 22), GTextAlignmentRight);
   } else {
     bool clock = strchr(bus->due, ':') != NULL;
-    text(ctx, bus->due, clock ? FONT_KEY_GOTHIC_18_BOLD : FONT_KEY_GOTHIC_24_BOLD,
-         GRect(right, clock ? 8 : 4, 50, 28), GTextAlignmentRight);
+    text(ctx, bus->due, clock ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_28_BOLD,
+         GRect(right - 6, clock ? 12 : 8, 56, 32), GTextAlignmentRight);
   }
-  graphics_context_set_stroke_color(ctx, GColorLightGray);
-  graphics_draw_line(ctx, GPoint(0, 41), GPoint(b.size.w, 41));
+  graphics_context_set_stroke_color(ctx, GColorBlack);
+  graphics_draw_line(ctx, GPoint(0, 55), GPoint(b.size.w, 55));
 }
 
 static void dep_refresh(MenuLayer *m, MenuIndex *i, void *ctx) {
   send_kv(MESSAGE_KEY_REFRESH, NULL);
-  strncpy(s_updated, "refreshing…", sizeof(s_updated) - 1);
+  strncpy(s_updated, "…", sizeof(s_updated) - 1);
   menu_layer_reload_data(s_dep_menu);
   vibes_short_pulse();
 }
@@ -256,12 +255,11 @@ static void toast_draw(Layer *l, GContext *ctx) {
   bool saved = s_toast_text[0] == 'S';
   graphics_context_set_fill_color(ctx, GColorBlack);
   graphics_fill_rect(ctx, b, 6, GCornersAll);
-  draw_star(ctx, GPoint(10, 13), 20, saved ? GColorSpringBud : GColorLightGray, saved);
+  draw_star(ctx, GPoint(10, 14), 24, saved ? GColorSpringBud : GColorWhite, saved);
   graphics_context_set_text_color(ctx, GColorWhite);
-  text(ctx, s_toast_text, FONT_KEY_GOTHIC_18_BOLD, GRect(40, 2, b.size.w - 46, 22), GTextAlignmentLeft);
-  graphics_context_set_text_color(ctx, GColorLightGray);
-  text(ctx, saved ? "Added to favourites" : "Not a favourite now", FONT_KEY_GOTHIC_14,
-       GRect(40, 22, b.size.w - 46, 18), GTextAlignmentLeft);
+  text(ctx, s_toast_text, FONT_KEY_GOTHIC_24_BOLD, GRect(42, 0, b.size.w - 48, 28), GTextAlignmentLeft);
+  text(ctx, saved ? "to favourites" : "from favourites", FONT_KEY_GOTHIC_18, GRect(42, 26, b.size.w - 48, 22),
+       GTextAlignmentLeft);
 }
 
 static void toast_hide(void *ctx) {
@@ -295,7 +293,7 @@ static void dep_load(Window *w) {
   text_layer_set_text_alignment(s_dep_status, GTextAlignmentCenter);
   layer_set_hidden(text_layer_get_layer(s_dep_status), true);
   layer_add_child(root, text_layer_get_layer(s_dep_status));
-  s_toast = layer_create(GRect(14, b.size.h - 78, b.size.w - 28, 46));
+  s_toast = layer_create(GRect(10, b.size.h - 66, b.size.w - 20, 54));
   layer_set_update_proc(s_toast, toast_draw);
   layer_set_hidden(s_toast, true);
   layer_add_child(root, s_toast);
@@ -345,12 +343,12 @@ static bool is_fav_link(int page, MenuIndex *i) {
   return page == PAGE_NEARBY && i->row == (s_nnear ? s_nnear : 1);
 }
 
-static int16_t list_header_height(MenuLayer *m, uint16_t section, void *ctx) { return 22; }
+static int16_t list_header_height(MenuLayer *m, uint16_t section, void *ctx) { return 28; }
 
 static int16_t list_cell_height(MenuLayer *m, MenuIndex *i, void *ctx) {
   int page = page_of(ctx);
-  if (is_fav_link(page, i)) return 36;
-  return page_count(page) ? 46 : 76;
+  if (is_fav_link(page, i)) return 44;
+  return page_count(page) ? 58 : 110;
 }
 
 static void list_header(GContext *ctx, const Layer *cell, uint16_t section, void *data) {
@@ -359,16 +357,15 @@ static void list_header(GContext *ctx, const Layer *cell, uint16_t section, void
   graphics_context_set_fill_color(ctx, TFI_GREEN);
   graphics_fill_rect(ctx, b, 0, GCornerNone);
   graphics_context_set_text_color(ctx, GColorWhite);
-  text(ctx, favs ? "Favourites" : "Nearby", FONT_KEY_GOTHIC_14_BOLD, GRect(6, 1, 100, 18), GTextAlignmentLeft);
-  text(ctx, favs ? "hold Select to save" : "within 1 km", FONT_KEY_GOTHIC_14,
-       GRect(90, 1, b.size.w - 96, 18), GTextAlignmentRight);
+  text(ctx, favs ? "Favourites" : "Nearby", FONT_KEY_GOTHIC_24_BOLD, GRect(6, -3, 120, 28), GTextAlignmentLeft);
+  text(ctx, favs ? "hold to save" : "1 km", FONT_KEY_GOTHIC_18_BOLD,
+       GRect(100, 3, b.size.w - 106, 22), GTextAlignmentRight);
 }
 
 static void list_state(GContext *ctx, GRect b, const char *title, const char *sub) {
   graphics_context_set_text_color(ctx, GColorBlack);
-  wrap(ctx, title, FONT_KEY_GOTHIC_18_BOLD, GRect(10, 6, b.size.w - 20, 44));
-  graphics_context_set_text_color(ctx, GColorDarkGray);
-  wrap(ctx, sub, FONT_KEY_GOTHIC_14, GRect(10, 50, b.size.w - 20, 22));
+  wrap(ctx, title, FONT_KEY_GOTHIC_24_BOLD, GRect(8, 4, b.size.w - 16, 56));
+  wrap(ctx, sub, FONT_KEY_GOTHIC_18, GRect(8, 62, b.size.w - 16, 44));
 }
 
 static void list_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data) {
@@ -376,22 +373,22 @@ static void list_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data)
   int page = page_of(data);
   if (is_fav_link(page, i)) {
     graphics_context_set_fill_color(ctx, GColorBlack);
-    graphics_fill_rect(ctx, GRect(0, 0, b.size.w, 1), 0, GCornerNone);
-    draw_star(ctx, GPoint(8, 10), 16, TFI_GREEN, true);
+    graphics_fill_rect(ctx, GRect(0, 0, b.size.w, 2), 0, GCornerNone);
+    draw_star(ctx, GPoint(8, 11), 20, TFI_GREEN, true);
     char label[24];
     snprintf(label, sizeof(label), "Favourites (%d)", s_nfav);
     graphics_context_set_text_color(ctx, GColorBlack);
-    text(ctx, label, FONT_KEY_GOTHIC_18_BOLD, GRect(30, 5, b.size.w - 60, 22), GTextAlignmentLeft);
-    text(ctx, "›", FONT_KEY_GOTHIC_24_BOLD, GRect(b.size.w - 24, 1, 16, 28), GTextAlignmentRight);
+    text(ctx, label, FONT_KEY_GOTHIC_24_BOLD, GRect(34, 4, b.size.w - 60, 30), GTextAlignmentLeft);
+    text(ctx, "›", FONT_KEY_GOTHIC_28_BOLD, GRect(b.size.w - 24, 0, 18, 34), GTextAlignmentRight);
     return;
   }
   if (!page_count(page)) {
     const char *st = s_near_state;
     if (page == PAGE_FAVS) list_state(ctx, b, "No favourites yet", "Hold Select on a stop, or add one in phone settings");
-    else if (!strcmp(st, "off")) list_state(ctx, b, "Turn on location for the Pebble app", "Favourites still work");
-    else if (!strcmp(st, "nofix")) list_state(ctx, b, "Can't get your location", "Trying again when you come back");
+    else if (!strcmp(st, "off")) list_state(ctx, b, "Turn on location", "for the Pebble app on your phone");
+    else if (!strcmp(st, "nofix")) list_state(ctx, b, "Can't find you", "Trying again when you come back");
     else if (!strcmp(st, "none")) list_state(ctx, b, "No stops within 1 km", "Add one by number in phone settings");
-    else if (!strcmp(st, "locating")) list_state(ctx, b, "Finding stops near you…", "Using your phone's GPS");
+    else if (!strcmp(st, "locating")) list_state(ctx, b, "Finding stops…", "Using your phone's GPS");
     else if (!strcmp(st, "loading")) list_state(ctx, b, "Loading stops…", "Only slow the first time each day");
     else list_state(ctx, b, st, "");  // error text from the phone
     return;
@@ -399,24 +396,18 @@ static void list_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data)
   Place *p = page_place(page, i->row);
   int x = 6;
   if (page == PAGE_NEARBY && p->fav) {
-    draw_star(ctx, GPoint(6, 5), 14, TFI_GREEN, true);
-    x = 24;
+    draw_star(ctx, GPoint(5, 6), 16, TFI_GREEN, true);
+    x = 25;
   }
   graphics_context_set_text_color(ctx, GColorBlack);
-  text(ctx, p->name, FONT_KEY_GOTHIC_18_BOLD, GRect(x, 0, b.size.w - 60 - x - 4, 22), GTextAlignmentLeft);
-  text(ctx, p->dist, FONT_KEY_GOTHIC_14_BOLD, GRect(b.size.w - 60, 3, 54, 18), GTextAlignmentRight);
-  GFont bold = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
-  GSize code = graphics_text_layout_get_content_size(p->code, bold, GRect(0, 0, 80, 18),
-                                                      GTextOverflowModeFill, GTextAlignmentLeft);
-  text(ctx, p->code, FONT_KEY_GOTHIC_14_BOLD, GRect(6, 23, 80, 18), GTextAlignmentLeft);
-  if (p->routes[0]) {
-    char routes[48];
-    snprintf(routes, sizeof(routes), " · %s", p->routes);
-    graphics_context_set_text_color(ctx, GColorDarkGray);
-    text(ctx, routes, FONT_KEY_GOTHIC_14, GRect(6 + code.w, 23, b.size.w - 12 - code.w, 18), GTextAlignmentLeft);
-  }
-  graphics_context_set_stroke_color(ctx, GColorLightGray);
-  graphics_draw_line(ctx, GPoint(0, 45), GPoint(b.size.w, 45));
+  text(ctx, p->name, FONT_KEY_GOTHIC_24_BOLD, GRect(x, -3, b.size.w - 64 - x, 28), GTextAlignmentLeft);
+  text(ctx, p->dist, FONT_KEY_GOTHIC_18_BOLD, GRect(b.size.w - 62, 2, 56, 22), GTextAlignmentRight);
+  char line[56];
+  if (p->routes[0]) snprintf(line, sizeof(line), "%s · %s", p->code, p->routes);
+  else snprintf(line, sizeof(line), "%s", p->code);
+  text(ctx, line, FONT_KEY_GOTHIC_18, GRect(6, 28, b.size.w - 12, 24), GTextAlignmentLeft);
+  graphics_context_set_stroke_color(ctx, GColorBlack);
+  graphics_draw_line(ctx, GPoint(0, 57), GPoint(b.size.w, 57));
 }
 
 static void list_select(MenuLayer *m, MenuIndex *i, void *ctx) {
@@ -462,7 +453,7 @@ static void inbox(DictionaryIterator *it, void *ctx) {
       parse_departures(t->value->cstring);
       char hhmm[8];
       clock_copy_time_string(hhmm, sizeof(hhmm));
-      snprintf(s_updated, sizeof(s_updated), "updated %s", hhmm);
+      strncpy(s_updated, hhmm, sizeof(s_updated) - 1);
       layer_set_hidden(text_layer_get_layer(s_dep_status), true);
       layer_set_hidden(menu_layer_get_layer(s_dep_menu), false);
       window_set_background_color(s_dep_window, GColorWhite);
