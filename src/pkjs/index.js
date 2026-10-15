@@ -244,9 +244,11 @@ Pebble.addEventListener('showConfiguration', function () {
     '.row{display:flex;align-items:center;gap:8px;background:#fff;border-radius:6px;padding:10px;margin:6px 0}.row div{flex:1}' +
     '.row small{color:#555;display:block}button{font-size:15px;border:0;border-radius:6px;padding:10px 14px;font-weight:bold}' +
     '.rm{background:#eee}.add{background:#018555;color:#fff}.save{background:#FFE600;width:100%;margin-top:24px;font-size:17px;padding:14px}' +
-    'p{color:#555;font-size:13px}.key{font-family:monospace;font-size:17px;letter-spacing:1px;word-break:break-all}' +
+    'p{color:#555;font-size:13px}.keycard{background:#fff;border-radius:6px;padding:10px;margin:6px 0}' +
+    '.key{font-family:monospace;font-size:14px;height:22px;line-height:22px;white-space:nowrap;overflow-x:auto}' +
+    '.keybar{display:flex;align-items:center;gap:6px;margin-top:6px}.keybar .badge{flex:1;margin:0}#cp{flex:0 0 auto;color:#018555}' +
     '.badge{display:inline-block;margin-top:4px;font-size:14px;font-weight:bold}.ok{color:#018555}.bad{color:#c62828}.checking{color:#555}' +
-    '.x{background:#eee;font-size:20px;padding:6px 12px}</style></head><body><header>Dublin Bus</header><main>' +
+    '.x{background:#eee;font-size:15px;padding:8px 0;width:58px;flex:0 0 58px}</style></head><body><header>Dublin Bus</header><main>' +
     '<h3>NTA API key</h3><div id="keybox"></div>' +
     '<p>Free from developer.nationaltransport.ie. Saved on your phone only.</p>' +
     '<h3>Favourite stops</h3><div id="favs"></div>' +
@@ -261,13 +263,17 @@ Pebble.addEventListener('showConfiguration', function () {
     'function rm(i){favs.splice(i,1);draw()}' +
     'var badges={ok:"✓ Working",bad:"✗ Rejected. Check the key",checking:"Checking… (open a stop on your watch)"};' +
     'var shown=false;' +
-    'function drawKey(){document.getElementById("keybox").innerHTML=keyInfo?"<div class=row><div><span id=kv class=key>"+(shown?e(keyInfo.full):"•••• •••• "+e(keyInfo.last4))+"</span><br><span class=\\"badge "+keyInfo.status+"\\">"+badges[keyInfo.status]+"</span><span id=cp class=badge></span></div>"+' +
-    '"<button class=x aria-label=\\"Show key\\" onclick=\\"shown=!shown;drawKey()\\">"+(shown?"🙈":"👁")+"</button>"+(shown?"<button class=x onclick=\\"copyKey()\\">Copy</button>":"")+' +
-    '"<button class=x aria-label=\\"Remove key\\" onclick=\\"clearKey=true;keyInfo=null;drawKey()\\">✕</button></div>":"<input id=k type=password autocomplete=off placeholder=\\"Paste your API key\\">"}' +
-    'function copyKey(){var done=function(){document.getElementById("cp").textContent="  Copied"};' +
+    'function drawKey(){var b=document.getElementById("keybox");if(!keyInfo){b.innerHTML="<input id=k type=password autocomplete=off placeholder=\\"Paste your API key\\">";return}' +
+    'b.innerHTML="<div class=keycard><div id=kv class=key></div><div class=keybar><span class=\\"badge "+keyInfo.status+"\\">"+badges[keyInfo.status]+"</span><span id=cp class=badge></span>"+' +
+    '"<button id=eye class=x aria-label=\\"Show key\\" onclick=\\"toggleKey()\\"></button><button class=x onclick=\\"copyKey()\\">Copy</button>"+' +
+    '"<button class=x aria-label=\\"Remove key\\" onclick=\\"clearKey=true;keyInfo=null;drawKey()\\">✕</button></div></div>";showKey()}' +
+    // The eye only swaps text: the card keeps the same size.
+    'function showKey(){document.getElementById("kv").textContent=shown?keyInfo.full:"•••• •••• •••• "+keyInfo.last4;document.getElementById("eye").textContent=shown?"Hide":"Show"}' +
+    'function toggleKey(){shown=!shown;showKey()}' +
+    'function copyKey(){var done=function(){document.getElementById("cp").textContent="Copied"};' +
     'if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(keyInfo.full).then(done,sel)}else sel();' +
-    'function sel(){var r=document.createRange();r.selectNodeContents(document.getElementById("kv"));var s=window.getSelection();s.removeAllRanges();s.addRange(r);' +
-    'try{if(document.execCommand("copy"))return done()}catch(x){}document.getElementById("cp").textContent="  Selected, tap and hold to copy"}}' +
+    'function sel(){shown=true;showKey();var r=document.createRange();r.selectNodeContents(document.getElementById("kv"));var s=window.getSelection();s.removeAllRanges();s.addRange(r);' +
+    'try{if(document.execCommand("copy"))return done()}catch(x){}document.getElementById("cp").textContent="Tap and hold to copy"}}' +
     'function add(){var n=document.getElementById("n").value.replace(/\\D/g,"");if(n&&!favs.some(function(f){return f.code==n}))favs.push({code:n});document.getElementById("n").value="";draw()}' +
     'function save(){var k=document.getElementById("k");location.href="pebblejs://close#"+encodeURIComponent(JSON.stringify({key:k?k.value.trim():"",clearKey:clearKey,favs:favs.map(function(f){return f.code})}))}' +
     'draw();drawKey()</script></body></html>';
