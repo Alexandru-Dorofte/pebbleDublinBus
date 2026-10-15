@@ -29,6 +29,9 @@ function store(k, v) {
 
 function key() { return store('apiKey') || ''; } // set in the phone settings page only
 
+// 'ok' | 'bad' | 'checking' — shown on the settings page; updated by every feed call.
+function keyStatus(v) { return v === undefined ? store('keyStatus') || '' : store('keyStatus', v); }
+
 function favs() {
   try { return JSON.parse(store('favs')) || DEFAULT_FAVS.slice(); } catch (e) { return DEFAULT_FAVS.slice(); }
 }
@@ -162,23 +165,32 @@ function sendData() {
   send({ DATA: data });
 }
 
-function refresh() {
-  if (!current || !timetables[current]) return;
-  if (feed && Date.now() - feedAt > STALE) feed = null;
-  if (!key()) return send({ STATUS: 'Add your NTA API key in the app settings on your phone' });
-  if (busy) return;
-  if (Date.now() - lastFetch < MIN_GAP) return sendData(); // recount minutes, no call
+// The only place the NTA API is called. Returns false (no call) inside the 60 s policy gap.
+function fetchFeed(done) {
+  if (busy || !key() || Date.now() - lastFetch < MIN_GAP) return false;
   busy = true;
   lastFetch = Date.now();
   store('lastFetch', String(lastFetch));
   get(FEED_URL, { 'x-api-key': key(), 'Cache-Control': 'no-cache' }, function (err, data) {
     busy = false;
+    if (err === 401 || err === 403) keyStatus('bad');
+    else if (!err) { keyStatus('ok'); feed = dep.indexFeed(data); feedAt = Date.now(); }
+    else console.log('NTA feed: ' + err); // keep the last good feed until STALE, then timetable only
+    done(err);
+  });
+  return true;
+}
+
+function refresh() {
+  if (!current || !timetables[current]) return;
+  if (feed && Date.now() - feedAt > STALE) feed = null;
+  if (!key()) return send({ STATUS: 'Add your NTA API key in the app settings on your phone' });
+  var calling = fetchFeed(function (err) {
     if (!current || !timetables[current]) return; // user left, or the stop's timetable is still loading
     if (err === 401 || err === 403) return send({ STATUS: 'NTA API key rejected. Check settings' });
-    if (err) console.log('NTA feed: ' + err); // keep the last good feed until STALE, then timetable only
-    else { feed = dep.indexFeed(data); feedAt = Date.now(); }
     sendData();
   });
+  if (!calling && !busy) sendData(); // inside the 60 s gap: recount minutes, no call
 }
 
 function open(code) {
@@ -223,6 +235,8 @@ Pebble.addEventListener('showConfiguration', function () {
     var s = byCode[code];
     return { code: code, name: s ? s[1] : '', routes: s ? s[4] : '' };
   });
+  var k = key(), st = keyStatus();
+  var keyInfo = k ? { last4: k.slice(-4), status: st || 'checking' } : null;
   var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<style>body{font-family:-apple-system,Roboto,sans-serif;margin:0;background:#f4f4f4;color:#111}' +
     'header{background:#018555;color:#fff;padding:16px;font-size:20px;font-weight:bold}main{padding:16px}' +
@@ -230,21 +244,26 @@ Pebble.addEventListener('showConfiguration', function () {
     '.row{display:flex;align-items:center;gap:8px;background:#fff;border-radius:6px;padding:10px;margin:6px 0}.row div{flex:1}' +
     '.row small{color:#555;display:block}button{font-size:15px;border:0;border-radius:6px;padding:10px 14px;font-weight:bold}' +
     '.rm{background:#eee}.add{background:#018555;color:#fff}.save{background:#FFE600;width:100%;margin-top:24px;font-size:17px;padding:14px}' +
-    'p{color:#555;font-size:13px}</style></head><body><header>Dublin Bus</header><main>' +
-    '<h3>NTA API key</h3><input id="k" type="password" autocomplete="off">' +
-    '<p>Free from developer.nationaltransport.ie. Saved on your phone only. Leave empty to keep the current key.</p>' +
+    'p{color:#555;font-size:13px}.key{font-family:monospace;font-size:17px;letter-spacing:1px}' +
+    '.badge{display:inline-block;margin-top:4px;font-size:14px;font-weight:bold}.ok{color:#018555}.bad{color:#c62828}.checking{color:#555}' +
+    '.x{background:#eee;font-size:20px;padding:6px 14px}</style></head><body><header>Dublin Bus</header><main>' +
+    '<h3>NTA API key</h3><div id="keybox"></div>' +
+    '<p>Free from developer.nationaltransport.ie. Saved on your phone only.</p>' +
     '<h3>Favourite stops</h3><div id="favs"></div>' +
     '<div class="row"><input id="n" inputmode="numeric" placeholder="Stop number, e.g. 4766"><button class="add" onclick="add()">Add</button></div>' +
     '<p>The number is on the stop\'s pole and in the TFI Live app.</p>' +
     '<button class="save" onclick="save()">Save to watch</button>' +
     '<p>Data: National Transport Authority, CC BY 4.0, provided as is.</p></main><script>' +
+    'var clearKey=false,keyInfo=' + JSON.stringify(keyInfo).replace(/</g, '\\u003c') + ';' +
     'var favs=' + JSON.stringify(list).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029') + ';' +
     'function e(s){return String(s).replace(/[&<>"\']/g,function(c){return "&#"+c.charCodeAt(0)+";"})}' +
     'function draw(){document.getElementById("favs").innerHTML=favs.map(function(f,i){return "<div class=row><div><b>"+e(f.name||"Stop "+f.code)+"</b><small>"+e(f.code)+(f.routes?" · "+e(f.routes):"")+"</small></div><button class=rm onclick=\\"rm("+i+")\\">Remove</button></div>"}).join("")||"<p>No favourites yet.</p>"}' +
     'function rm(i){favs.splice(i,1);draw()}' +
+    'var badges={ok:"✓ Working",bad:"✗ Rejected. Check the key",checking:"Checking… (open a stop on your watch)"};' +
+    'function drawKey(){document.getElementById("keybox").innerHTML=keyInfo?"<div class=row><div><span class=key>•••• •••• "+e(keyInfo.last4)+"</span><br><span class=\\"badge "+keyInfo.status+"\\">"+badges[keyInfo.status]+"</span></div><button class=x onclick=\\"clearKey=true;keyInfo=null;drawKey()\\">✕</button></div>":"<input id=k type=password autocomplete=off placeholder=\\"Paste your API key\\">"}' +
     'function add(){var n=document.getElementById("n").value.replace(/\\D/g,"");if(n&&!favs.some(function(f){return f.code==n}))favs.push({code:n});document.getElementById("n").value="";draw()}' +
-    'function save(){location.href="pebblejs://close#"+encodeURIComponent(JSON.stringify({key:document.getElementById("k").value.trim(),favs:favs.map(function(f){return f.code})}))}' +
-    'draw()</script></body></html>';
+    'function save(){var k=document.getElementById("k");location.href="pebblejs://close#"+encodeURIComponent(JSON.stringify({key:k?k.value.trim():"",clearKey:clearKey,favs:favs.map(function(f){return f.code})}))}' +
+    'draw();drawKey()</script></body></html>';
   Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
 });
 
@@ -252,7 +271,12 @@ Pebble.addEventListener('webviewclosed', function (e) {
   if (!e || !e.response) return;
   try {
     var r = JSON.parse(decodeURIComponent(e.response));
-    if (r.key) store('apiKey', r.key);
+    if (r.clearKey) { try { localStorage.removeItem('apiKey'); } catch (err) {} keyStatus(''); feed = null; }
+    if (r.key) {
+      store('apiKey', r.key);
+      keyStatus('checking');
+      fetchFeed(function () {}); // check it now if the 60 s gap allows, else on the next refresh
+    }
     if (Array.isArray(r.favs)) store('favs', JSON.stringify(r.favs.filter(function (c) { return /^\d+$/.test(c); })));
   } catch (err) { return; }
   sendHome();
