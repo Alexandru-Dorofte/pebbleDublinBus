@@ -14,7 +14,7 @@ var lastFetch = 0; // persisted in localStorage, so relaunching can't make two c
 var index = null;         // [[code, name, lat, lon, routes], ...]
 var indexError = '';
 var byCode = {};
-var here = null;          // {lat, lon}, 'off', or null while locating
+var here = null;          // {lat, lon, t}, 'off', 'nofix', or null while locating
 var current = null;       // stop code open on the watch
 var lastSent = '';        // last DATA sent, to skip identical updates (saves Bluetooth)
 var timetables = {};      // code -> stop file, for this session
@@ -98,6 +98,7 @@ function stopDist(code) {
 // Home list for the watch, one stop per line:
 // kind \t code \t name \t distance \t routes \t fav(1/0)   (kind F favourite, N nearby)
 // or "S \t state" for the Nearby section: loading | locating | off | none
+// or "G \t seconds": age of the GPS fix the distances come from (an age, so the clocks needn't agree)
 function sendHome() {
   var f = favs(), lines = [];
   // Keep the message inside the watch's inbox: the watch shows ~40 chars of routes anyway.
@@ -106,6 +107,7 @@ function sendHome() {
     var s = byCode[code];
     lines.push(['F', code, s ? s[1] : 'Stop ' + code, stopDist(code), s ? routes(s[4]) : '', 1].join('\t'));
   });
+  if (here && here.t) lines.push('G\t' + Math.max(0, Math.round((Date.now() - here.t) / 1000)));
   if (indexError) lines.push('S\t' + indexError);
   else if (!index) lines.push('S\tloading');
   else if (here === 'off' || here === 'nofix') lines.push('S\t' + here);
@@ -124,17 +126,17 @@ function sendHome() {
   send({ HOME: lines.join('\n') });
 }
 
-function locate() {
+function locate(fresh) {
   if (!navigator.geolocation) { here = 'off'; return sendHome(); }
   navigator.geolocation.getCurrentPosition(function (p) {
-    here = { lat: p.coords.latitude, lon: p.coords.longitude };
+    here = { lat: p.coords.latitude, lon: p.coords.longitude, t: Date.now() };
     sendHome();
   }, function (err) {
     // Permission denied means location is off; a timeout keeps the last fix if we have one.
     if (err && err.code === 1) here = 'off';
     else if (!here || here === 'off') here = 'nofix';
     sendHome();
-  }, { timeout: 15000, maximumAge: 60000 });
+  }, { timeout: 15000, maximumAge: fresh ? 0 : 60000 });
 }
 
 function loadIndex() {
@@ -227,6 +229,7 @@ Pebble.addEventListener('appmessage', function (e) {
   if (p.OPEN !== undefined) open(String(p.OPEN));
   if (p.FAV !== undefined) toggleFav(String(p.FAV));
   if (p.REFRESH !== undefined) { lastSent = ''; refresh(); } // watch shows "…" until it hears back
+  if (p.HOME !== undefined) locate(true); // flick or Up on Nearby: new fix now
   if (p.CLOSE !== undefined) { current = null; locate(); } // back on the home screen: re-check location
 });
 

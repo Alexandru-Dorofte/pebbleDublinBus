@@ -5,6 +5,7 @@ Next buses at Dublin stops, on a Pebble Time 2, with large, high-contrast text.
 ## Features
 
 - **Nearby**: the 10 closest stops within 1 km, from your phone's GPS. A **★ Favourites** row at the end opens your saved stops
+- **Refresh location**: flick your wrist, or press Up on the top row. The header shows how old the fix is (*GPS 3 min*)
 - **Departures**: Select opens a stop. Live NTA GTFS-Realtime times (*Live*), with the timetable as fallback (*Timetable*)
 - **Favourites**: long-press Select on a stop to save or remove it, or manage them in the phone settings
 - **Timetables**: built nightly by `.github/workflows/site.yml` (`build_site.py`) and hosted on

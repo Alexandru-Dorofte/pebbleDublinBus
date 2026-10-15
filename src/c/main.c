@@ -18,6 +18,9 @@ static char s_home_buf[2048], s_dep_buf[1024];
 static Place s_places[MAX_PLACES];  // favourites first, then nearby
 static int s_nfav, s_nnear;
 static char s_near_state[64] = "loading";
+static time_t s_gps_time;  // when the phone got the GPS fix behind the distances
+static bool s_locating;    // waiting on a fix the user asked for
+static time_t s_asked;     // when we last asked
 
 static char s_open_code[8];  // stop the departures window is showing
 static char *s_name = "", *s_code = "", *s_dist = "";
@@ -44,10 +47,15 @@ static void parse_home(const char *data) {
   strncpy(s_home_buf, data, sizeof(s_home_buf) - 1);
   s_nfav = s_nnear = 0;
   s_near_state[0] = '\0';
+  s_locating = false;
   // Lines arrive favourites first, then nearby, so they fill s_places in order.
   char *rest = s_home_buf, *line;
   while ((line = cut(&rest, '\n'))) {
     char *kind = field(&line);
+    if (kind[0] == 'G') {
+      s_gps_time = time(NULL) - atoi(field(&line));
+      continue;
+    }
     if (kind[0] == 'S') {
       strncpy(s_near_state, field(&line), sizeof(s_near_state) - 1);
       continue;
@@ -362,7 +370,13 @@ static void list_header(GContext *ctx, const Layer *cell, uint16_t section, void
   graphics_fill_rect(ctx, b, 0, GCornerNone);
   graphics_context_set_text_color(ctx, GColorWhite);
   text(ctx, favs ? "Favourites" : "Nearby", FONT_KEY_GOTHIC_24_BOLD, GRect(6, -3, 120, 28), GTextAlignmentLeft);
-  text(ctx, favs ? "hold to save" : "1 km", FONT_KEY_GOTHIC_18_BOLD,
+  char gps[16] = "1 km";
+  int age = (time(NULL) - s_gps_time) / 60;
+  if (s_locating && time(NULL) - s_asked < 30) strcpy(gps, "GPS…");  // phone gives up after 15 s
+  else if (s_gps_time && age < 1) strcpy(gps, "GPS now");
+  else if (s_gps_time && age < 60) snprintf(gps, sizeof(gps), "GPS %d min", age);
+  else if (s_gps_time) strcpy(gps, "GPS 1h+");
+  text(ctx, favs ? "hold to save" : gps, FONT_KEY_GOTHIC_18_BOLD,
        GRect(100, 3, b.size.w - 106, 22), GTextAlignmentRight);
 }
 
@@ -390,7 +404,7 @@ static void list_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data)
     const char *st = s_near_state;
     if (page == PAGE_FAVS) list_state(ctx, b, "No favourites yet", "Hold Select on a stop, or add one in phone settings");
     else if (!strcmp(st, "off")) list_state(ctx, b, "Turn on location", "for the Pebble app on your phone");
-    else if (!strcmp(st, "nofix")) list_state(ctx, b, "Can't find you", "Trying again when you come back");
+    else if (!strcmp(st, "nofix")) list_state(ctx, b, "Can't find you", "Flick your wrist to try again");
     else if (!strcmp(st, "none")) list_state(ctx, b, "No stops within 1 km", "Add one by number in phone settings");
     else if (!strcmp(st, "locating")) list_state(ctx, b, "Finding stops…", "Using your phone's GPS");
     else if (!strcmp(st, "loading")) list_state(ctx, b, "Loading stops…", "Only slow the first time each day");
@@ -420,6 +434,53 @@ static void list_select(MenuLayer *m, MenuIndex *i, void *ctx) {
   else if (i->row < page_count(page)) open_stop(page_place(page, i->row));
 }
 
+// New GPS fix on request: flick the wrist, or press Up on the top row of Nearby.
+static void relocate(void) {
+  if (time(NULL) - s_asked < 10) return;  // a flick fires several taps
+  s_asked = time(NULL);
+  s_locating = true;  // header shows "GPS…" until the phone answers
+  menu_layer_reload_data(s_list_menu[PAGE_NEARBY]);
+  send_kv(MESSAGE_KEY_HOME, NULL);
+}
+
+static void flick(AccelAxisType axis, int32_t direction) { relocate(); }
+
+static void minute(struct tm *t, TimeUnits changed) { menu_layer_reload_data(s_list_menu[PAGE_NEARBY]); }
+
+// Nearby replaces the menu's own clicks so Up on the top row can refresh.
+static void nearby_scroll(ClickRecognizerRef r, void *ctx) {
+  MenuLayer *m = s_list_menu[PAGE_NEARBY];
+  bool up = click_recognizer_get_button_id(r) == BUTTON_ID_UP;
+  if (up && menu_layer_get_selected_index(m).row == 0) {
+    if (!click_recognizer_is_repeating(r)) relocate();  // holding Up to scroll back doesn't count
+  } else {
+    menu_layer_set_selected_next(m, up, MenuRowAlignCenter, true);
+  }
+}
+
+static void nearby_select(ClickRecognizerRef r, void *ctx) {
+  MenuIndex i = menu_layer_get_selected_index(s_list_menu[PAGE_NEARBY]);
+  list_select(s_list_menu[PAGE_NEARBY], &i, (void *)PAGE_NEARBY);
+}
+
+static void nearby_clicks(void *ctx) {
+  window_single_repeating_click_subscribe(BUTTON_ID_UP, 100, nearby_scroll);
+  window_single_repeating_click_subscribe(BUTTON_ID_DOWN, 100, nearby_scroll);
+  window_single_click_subscribe(BUTTON_ID_SELECT, nearby_select);
+}
+
+static void list_appear(Window *w) {
+  if (page_of(window_get_user_data(w)) != PAGE_NEARBY) return;
+  accel_tap_service_subscribe(flick);
+  tick_timer_service_subscribe(MINUTE_UNIT, minute);
+}
+
+static void list_disappear(Window *w) {
+  if (page_of(window_get_user_data(w)) != PAGE_NEARBY) return;
+  accel_tap_service_unsubscribe();
+  tick_timer_service_unsubscribe();
+}
+
 static void list_load(Window *w) {
   int page = page_of(window_get_user_data(w));
   Layer *root = window_get_root_layer(w);
@@ -429,6 +490,7 @@ static void list_load(Window *w) {
     .get_num_rows = list_rows, .get_header_height = list_header_height, .draw_header = list_header,
     .get_cell_height = list_cell_height, .draw_row = list_row, .select_click = list_select,
   });
+  if (page == PAGE_NEARBY) window_set_click_config_provider(w, nearby_clicks);
 }
 
 static void list_unload(Window *w) {
@@ -478,7 +540,8 @@ int main(void) {
   for (int p = 0; p < 2; p++) {
     s_list_window[p] = window_create();
     window_set_user_data(s_list_window[p], (void *)p);
-    window_set_window_handlers(s_list_window[p], (WindowHandlers){.load = list_load, .unload = list_unload});
+    window_set_window_handlers(s_list_window[p], (WindowHandlers){
+        .load = list_load, .appear = list_appear, .disappear = list_disappear, .unload = list_unload});
   }
   s_dep_window = window_create();
   window_set_window_handlers(s_dep_window, (WindowHandlers){.load = dep_load, .unload = dep_unload});
