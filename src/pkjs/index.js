@@ -102,7 +102,11 @@ function stopDist(code) {
 function sendHome() {
   var f = favs(), lines = [];
   // Keep the message inside the watch's inbox: the watch shows ~40 chars of routes anyway.
-  var routes = function (r) { return r.length > 40 ? r.slice(0, 39) + '…' : r; };
+  // First 4 routes, then "+N": whole routes only (the watch firmware blanks a cut like "C4 ·…").
+  var routes = function (r) {
+    var all = r ? r.split(' · ') : [];
+    return all.slice(0, 4).join(' · ') + (all.length > 4 ? ' +' + (all.length - 4) : '');
+  };
   f.slice(0, MAX_FAVS).forEach(function (code) {
     var s = byCode[code];
     lines.push(['F', code, s ? s[1] : 'Stop ' + code, stopDist(code), s ? routes(s[4]) : '', 1].join('\t'));
@@ -136,7 +140,7 @@ function locate(fresh) {
     if (err && err.code === 1) here = 'off';
     else if (!here || here === 'off') here = 'nofix';
     sendHome();
-  }, { timeout: 15000, maximumAge: fresh ? 0 : 60000 });
+  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: fresh ? 0 : 10000 }); // real GPS, not Wi-Fi/cell guesses
 }
 
 function loadIndex() {

@@ -139,6 +139,9 @@ static void draw_star(GContext *ctx, GPoint o, int size, GColor c, bool filled) 
 }
 
 static void text(GContext *ctx, const char *s, const char *font, GRect r, GTextAlignment a) {
+  // Newer watch firmware draws nothing when a line needing "…" only just fits the box;
+  // spare height fixes that (still well short of a second line).
+  r.size.h += 8;
   graphics_draw_text(ctx, s, fonts_get_system_font(font), r, GTextOverflowModeTrailingEllipsis, a, NULL);
 }
 
@@ -420,10 +423,16 @@ static void list_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data)
   graphics_context_set_text_color(ctx, GColorBlack);
   text(ctx, p->name, FONT_KEY_GOTHIC_24_BOLD, GRect(x, -3, b.size.w - 64 - x, 28), GTextAlignmentLeft);
   text(ctx, p->dist, FONT_KEY_GOTHIC_18_BOLD, GRect(b.size.w - 62, 2, 56, 22), GTextAlignmentRight);
-  char line[56];
-  if (p->routes[0]) snprintf(line, sizeof(line), "%s · %s", p->code, p->routes);
-  else snprintf(line, sizeof(line), "%s", p->code);
-  text(ctx, line, FONT_KEY_GOTHIC_18, GRect(6, 28, b.size.w - 12, 24), GTextAlignmentLeft);
+  // Stop number as a black tag (like the pole), routes after it in green.
+  GFont tag = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  int tw = graphics_text_layout_get_content_size(p->code, tag, GRect(0, 0, 100, 24),
+                                                 GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft).w + 8;
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, GRect(6, 30, tw, 21), 3, GCornersAll);
+  graphics_context_set_text_color(ctx, GColorWhite);
+  text(ctx, p->code, FONT_KEY_GOTHIC_18_BOLD, GRect(6, 27, tw, 22), GTextAlignmentCenter);
+  graphics_context_set_text_color(ctx, LIVE_FG);
+  text(ctx, p->routes, FONT_KEY_GOTHIC_18_BOLD, GRect(tw + 12, 27, b.size.w - tw - 18, 24), GTextAlignmentLeft);
   graphics_context_set_stroke_color(ctx, GColorBlack);
   graphics_draw_line(ctx, GPoint(0, 57), GPoint(b.size.w, 57));
 }
