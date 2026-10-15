@@ -20,7 +20,7 @@
 
 - **Nearby stops**: the 10 closest stops within 1 km, with distance and routes
 - **Live times**: realtime NTA data marked *Live*, with the timetable as a fallback (*Timetable*)
-- **Favourites**: save your usual stops and reach them from the end of the Nearby list
+- **Favourites**: save your usual stops; they sit one Up press away at the top of Nearby, and load ahead of time
 - **Location refresh**: flick your wrist for a new fix. The header shows how old it is (*GPS now*, *GPS 3 min*)
 - **Easy to read**: large bold fonts and strong TFI yellow and green that hold up on the Time 2's display
 
@@ -29,7 +29,8 @@
 | Screen | Button | Action |
 |---|---|---|
 | Nearby | **Up / Down** | Scroll |
-| | **Up** on the top row | Refresh location |
+| | **Up** from the first stop | Favourites |
+| | **Up** on Favourites | Refresh location |
 | | **Flick wrist** | Refresh location |
 | | **Select** | Open the stop |
 | Departures | **Select** | Refresh times |

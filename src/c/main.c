@@ -222,7 +222,7 @@ static void dep_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data) 
   graphics_context_set_fill_color(ctx, TFI_GREEN);
   graphics_fill_rect(ctx, GRect(3, 11, 46, 32), 4, GCornersAll);
   graphics_context_set_text_color(ctx, GColorWhite);
-  text(ctx, bus->route, FONT_KEY_GOTHIC_24_BOLD, GRect(3, 12, 46, 30), GTextAlignmentCenter);
+  text(ctx, bus->route, FONT_KEY_GOTHIC_24_BOLD, GRect(3, 10, 46, 30), GTextAlignmentCenter);  // centred in the badge (measured)
 
   graphics_context_set_text_color(ctx, GColorBlack);
   text(ctx, bus->head[0] ? bus->head : "Extra bus", FONT_KEY_GOTHIC_18_BOLD,
@@ -351,12 +351,12 @@ static int page_count(int page) { return page == PAGE_FAVS ? s_nfav : s_nnear; }
 
 static uint16_t list_rows(MenuLayer *m, uint16_t section, void *ctx) {
   int page = page_of(ctx), n = page_count(page);
-  return (n ? n : 1) + (page == PAGE_NEARBY);  // Nearby ends with a link to Favourites
+  return (n ? n : 1) + (page == PAGE_NEARBY);  // + the Favourites link on Nearby
 }
 
-static bool is_fav_link(int page, MenuIndex *i) {
-  return page == PAGE_NEARBY && i->row == (s_nnear ? s_nnear : 1);
-}
+// Nearby starts with a link to Favourites; stop rows come after it.
+static bool is_fav_link(int page, MenuIndex *i) { return page == PAGE_NEARBY && i->row == 0; }
+static int place_row(int page, MenuIndex *i) { return i->row - (page == PAGE_NEARBY); }
 
 static int16_t list_header_height(MenuLayer *m, uint16_t section, void *ctx) { return 28; }
 
@@ -379,7 +379,7 @@ static void list_header(GContext *ctx, const Layer *cell, uint16_t section, void
   else if (s_gps_time && age < 1) strcpy(gps, "GPS now");
   else if (s_gps_time && age < 60) snprintf(gps, sizeof(gps), "GPS %d min", age);
   else if (s_gps_time) strcpy(gps, "GPS 1h+");
-  text(ctx, favs ? "hold to save" : gps, FONT_KEY_GOTHIC_18_BOLD,
+  text(ctx, favs ? "" : gps, FONT_KEY_GOTHIC_18_BOLD,
        GRect(100, 3, b.size.w - 106, 22), GTextAlignmentRight);
 }
 
@@ -394,7 +394,7 @@ static void list_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data)
   int page = page_of(data);
   if (is_fav_link(page, i)) {
     graphics_context_set_fill_color(ctx, GColorBlack);
-    graphics_fill_rect(ctx, GRect(0, 0, b.size.w, 2), 0, GCornerNone);
+    graphics_fill_rect(ctx, GRect(0, b.size.h - 2, b.size.w, 2), 0, GCornerNone);
     draw_star(ctx, GPoint(8, 11), 20, TFI_GREEN, true);
     char label[24];
     snprintf(label, sizeof(label), "Favourites (%d)", s_nfav);
@@ -414,7 +414,7 @@ static void list_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data)
     else list_state(ctx, b, st, "");  // error text from the phone
     return;
   }
-  Place *p = page_place(page, i->row);
+  Place *p = page_place(page, place_row(page, i));
   int x = 6;
   if (page == PAGE_NEARBY && p->fav) {
     draw_star(ctx, GPoint(5, 6), 16, TFI_GREEN, true);
@@ -440,7 +440,7 @@ static void list_row(GContext *ctx, const Layer *cell, MenuIndex *i, void *data)
 static void list_select(MenuLayer *m, MenuIndex *i, void *ctx) {
   int page = page_of(ctx);
   if (is_fav_link(page, i)) window_stack_push(s_list_window[PAGE_FAVS], true);
-  else if (i->row < page_count(page)) open_stop(page_place(page, i->row));
+  else if (place_row(page, i) < page_count(page)) open_stop(page_place(page, place_row(page, i)));
 }
 
 // New GPS fix on request: flick the wrist, or press Up on the top row of Nearby.
@@ -499,7 +499,11 @@ static void list_load(Window *w) {
     .get_num_rows = list_rows, .get_header_height = list_header_height, .draw_header = list_header,
     .get_cell_height = list_cell_height, .draw_row = list_row, .select_click = list_select,
   });
-  if (page == PAGE_NEARBY) window_set_click_config_provider(w, nearby_clicks);
+  if (page == PAGE_NEARBY) {
+    window_set_click_config_provider(w, nearby_clicks);
+    // Start on the nearest stop; Favourites is one Up away.
+    menu_layer_set_selected_index(s_list_menu[page], (MenuIndex){0, 1}, MenuRowAlignNone, false);
+  }
 }
 
 static void list_unload(Window *w) {

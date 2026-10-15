@@ -78,4 +78,24 @@ assert.strictEqual(dep.due(n[0].ms, night), '10 min');
 
 assert.strictEqual(dep.due(now + 30000, now), 'Due');
 assert.strictEqual(dep.due(now + 75 * 60000, now), '09:15');
+
+// cached() from index.js, against fake storage and network: favourites (keepDays 6) open from an
+// older copy at once; the stop list (keepDays 0) waits for today's copy.
+(function () {
+  var fn = require('fs').readFileSync(__dirname + '/src/pkjs/index.js', 'utf8').match(/function cached\([\s\S]*?\n}\n/)[0];
+  var mem = {}, calls = 0, online = true, SITE = '';
+  function store(k, v) { if (v === undefined) return mem[k] || null; mem[k] = v; }
+  function today() { return '2026-10-15'; }
+  function get(url, h, cb) { calls++; online ? cb(null, 'NEW') : cb('network'); }
+  function saved(daysAgo) { mem['c:x'] = JSON.stringify({ day: 'old', at: Date.now() - daysAgo * 86400e3, data: 'OLD' }); }
+  var cached = eval('(' + fn + ')');
+  function run(keep) { var got = []; cached('x', keep, function (e, d) { got.push(e || d); }); return got; }
+  assert.deepEqual(run(6), ['NEW']); assert.strictEqual(calls, 1);  // nothing saved: download
+  assert.deepEqual(run(6), ['NEW']); assert.strictEqual(calls, 1);  // today's copy: no download
+  saved(2); assert.deepEqual(run(6), ['OLD']);                       // older favourite: at once...
+  assert.strictEqual(JSON.parse(mem['c:x']).data, 'NEW');            // ...and refreshed behind
+  saved(2); assert.deepEqual(run(0), ['NEW']);                       // stop list waits for today's
+  saved(9); online = false; assert.deepEqual(run(6), ['OLD']);       // too old but offline: fallback
+  delete mem['c:x']; assert.deepEqual(run(6), ['network']);          // nothing at all: the error
+})();
 console.log('ok');

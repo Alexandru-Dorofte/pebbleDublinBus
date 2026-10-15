@@ -5,6 +5,7 @@ var SITE = 'https://alexandru-dorofte.github.io/pebbleDublinBus/';
 var FEED_URL = 'https://api.nationaltransport.ie/gtfsr/v2/TripUpdates?format=json';
 var MIN_GAP = 61 * 1000; // NTA usage policy: at most one GTFS-R call per 60 s per key
 var NEARBY_M = 1000, NEARBY_MAX = 10, MAX_FAVS = 12;
+var FAV_DAYS = 6;          // favourites' timetables kept on the phone (files cover 8 days)
 var TICK = 20 * 1000;     // recount minutes; MIN_GAP still limits API calls
 var STALE = 3 * 60 * 1000; // keep using the last good feed this long if a fetch fails
 var DEFAULT_FAVS = ['4766'];
@@ -61,20 +62,19 @@ function get(url, headers, done) {
 }
 
 // Cached for the day in localStorage; the site rebuilds daily.
-function cached(name, done) {
-  var k = 'c:' + name, hit = store(k);
-  if (hit) {
-    try {
-      var c = JSON.parse(hit);
-      if (c.day === today()) return done(null, c.data);
-    } catch (e) {}
-  }
+// Site files kept in localStorage. A copy from today is used as is. With keepDays, an older
+// copy within that age is used at once and refreshed in the background; otherwise an old copy
+// is only a fallback for when the phone is offline.
+function cached(name, keepDays, done) {
+  var k = 'c:' + name, c = null;
+  try { c = JSON.parse(store(k)); } catch (e) {}
+  if (c && c.day === today()) return done(null, c.data);
+  var fresh = keepDays && c && c.at && Date.now() - c.at < keepDays * 86400 * 1000;
+  if (fresh) done(null, c.data);
   get(SITE + name, {}, function (err, data) {
-    if (err) { // offline: an older copy beats nothing
-      try { return done(null, JSON.parse(hit).data); } catch (e) { return done(err); }
-    }
-    store(k, JSON.stringify({ day: today(), data: data }));
-    done(null, data);
+    if (err) return fresh ? null : c ? done(null, c.data) : done(err); // offline: an older copy beats nothing
+    store(k, JSON.stringify({ day: today(), at: Date.now(), data: data }));
+    if (!fresh) done(null, data);
   });
 }
 
@@ -144,7 +144,7 @@ function locate(fresh) {
 }
 
 function loadIndex() {
-  cached('stops.json', function (err, data) {
+  cached('stops.json', 0, function (err, data) {
     indexError = err ? 'Could not load the stop list. Check your phone\'s connection' : '';
     if (err) return sendHome();
     index = data;
@@ -203,7 +203,10 @@ function open(code) {
   current = code;
   lastSent = '';
   if (timetables[code]) return refresh();
-  get(SITE + 's/' + code + '.json', {}, function (err, data) { // up to ~200 KB; kept in memory for this session
+  // Up to ~200 KB. Favourites stay on the phone for days; other stops only for this session.
+  var name = 's/' + code + '.json';
+  var load = favs().indexOf(code) >= 0 ? cached.bind(null, name, FAV_DAYS) : get.bind(null, SITE + name, {});
+  load(function (err, data) {
     if (current !== code) return;
     if (err) return send({ STATUS: err === 404 ? 'No buses found for stop ' + code : 'Could not load the timetable' });
     timetables[code] = data;
@@ -215,16 +218,27 @@ function toggleFav(code) {
   var f = favs(), i = f.indexOf(code);
   if (i >= 0) f.splice(i, 1); else f.push(code);
   store('favs', JSON.stringify(f));
+  if (i >= 0) { try { localStorage.removeItem('c:s/' + code + '.json'); } catch (e) {} } // free the space
+  else if (timetables[code]) store('c:s/' + code + '.json', JSON.stringify({ day: today(), at: Date.now(), data: timetables[code] }));
   var msg = { TOAST: i >= 0 ? 'Removed' : 'Saved' };
   if (current === code && timetables[code]) msg.DATA = lastSent = render();
   send(msg);
   sendHome();
 }
 
+// Get favourites ready while the user is still on Nearby: their timetables and the live feed.
+function warm() {
+  favs().forEach(function (code) {
+    if (!timetables[code]) cached('s/' + code + '.json', FAV_DAYS, function (err, data) { if (!err) timetables[code] = data; });
+  });
+  fetchFeed(function () { if (current && timetables[current]) sendData(); }); // a stop opened meanwhile
+}
+
 Pebble.addEventListener('ready', function () {
   lastFetch = +store('lastFetch') || 0;
   loadIndex();
   locate();
+  warm();
   setInterval(refresh, TICK);
 });
 
