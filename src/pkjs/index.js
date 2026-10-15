@@ -276,7 +276,8 @@ Pebble.addEventListener('showConfiguration', function () {
     '<div class="row"><input id="n" inputmode="numeric" placeholder="Stop number, e.g. 4766"><button class="add" onclick="add()">Add</button></div>' +
     '<p>The number is on the stop\'s pole and in the TFI Live app.</p>' +
     '<button class="save" onclick="save()">Save to watch</button>' +
-    '<p>Data: National Transport Authority, CC BY 4.0, provided as is.</p></main><script>' +
+    '<p>Data: <a href="https://www.nationaltransport.ie">National Transport Authority</a>, CC BY 4.0. ' +
+    'Provided as is; the NTA is not responsible for errors or inaccuracies.</p></main><script>' +
     'var clearKey=false,keyInfo=' + JSON.stringify(keyInfo).replace(/</g, '\\u003c') + ';' +
     'var favs=' + JSON.stringify(list).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029') + ';' +
     'function e(s){return String(s).replace(/[&<>"\']/g,function(c){return "&#"+c.charCodeAt(0)+";"})}' +

@@ -77,4 +77,6 @@ pebble install --cloudpebble       # your watch, via the phone's Dev Connect
 
 ---
 
-<sub>Data: National Transport Authority, licensed CC BY 4.0, provided as is. Not affiliated with Dublin Bus or TFI.</sub>
+<sub>Data: [National Transport Authority](https://www.nationaltransport.ie) ([GTFS data](https://developer.nationaltransport.ie)), licensed
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Provided as is; the NTA is not responsible for any errors or
+inaccuracies. Not affiliated with Dublin Bus or TFI.</sub>
