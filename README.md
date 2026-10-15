@@ -2,23 +2,25 @@
 
 Next buses at Dublin stops, on a Pebble Time 2 (emery). Pebble Round 2 (gabbro) builds too.
 
-- **Favourites:** saved stops at the top. Long-press Select on a stop to save or remove it, or manage them in the phone settings.
-- **Nearby:** the 10 closest stops within 1 km, from your phone's GPS.
-- **Live:** NTA GTFS-Realtime delays on top of the timetable, refreshed every 61 s while a stop is open.
-  Rows marked *Live* are realtime predictions. *Scheduled* rows are timetable only.
+## Features
 
-## How it works
+- **Nearby**: the 10 closest stops within 1 km, from your phone's GPS. A **★ Favourites** row at the end opens your saved stops
+- **Departures**: Select opens a stop. Live NTA GTFS-Realtime times (*Live*), with the timetable as fallback (*Scheduled*)
+- **Favourites**: long-press Select on a stop to save or remove it, or manage them in the phone settings
+- **Timetables**: built nightly by `.github/workflows/site.yml` (`build_site.py`) and hosted on
+  [GitHub Pages](https://alexandru-dorofte.github.io/pebbleDublinBus/). The phone downloads only the stop you open
 
-The NTA realtime feed only sends delays, so the app also needs each stop's timetable.
-`.github/workflows/site.yml` runs `build_site.py` every night. The script splits TFI's free static GTFS into
-`stops.json` (every Dublin-area stop with its location) and `s/<stop>.json` (that stop's next 8 days of timetable).
-GitHub Pages hosts them, and the phone downloads only the stop you open.
+| Nearby | Favourites | Saved | Settings needed |
+|:---:|:---:|:---:|:---:|
+| <img src="screenshots/nearby.png" alt="Nearby" width="200"> | <img src="screenshots/favourites.png" alt="Favourites" width="200"> | <img src="screenshots/saved.png" alt="Saved" width="200"> | <img src="screenshots/settings.png" alt="Settings needed" width="200"> |
 
 ## Setup
 
 1. Get a free API key at <https://developer.nationaltransport.ie>.
-2. Install the app, open its settings in the Pebble phone app and paste the key. The key is stored only on your phone
-   and is never in this repo or the app file.
+2. Open the app's settings in the Pebble phone app and paste the key. It is stored only on your phone.
+
+The app calls the realtime API at most once every 61 s, per the
+[NTA usage policy](https://developer.nationaltransport.ie/usagepolicy) (one call per 60 s per key).
 
 ## Building & running
 
@@ -28,8 +30,5 @@ pebble build
 pebble install --emulator emery
 pebble install --cloudpebble       # your watch, via the phone's Dev Connect
 ```
-
-The app calls the realtime API at most once every 61 s, per the
-[NTA usage policy](https://developer.nationaltransport.ie/usagepolicy) (one call per 60 s per key).
 
 Data: National Transport Authority, licensed CC BY 4.0, provided as is.
