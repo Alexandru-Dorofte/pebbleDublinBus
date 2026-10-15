@@ -86,6 +86,7 @@ static void parse_departures(const char *data) {
 static uint32_t s_out_key;
 static char s_out_val[8];
 static bool s_out_pending;
+static int s_out_tries;
 
 static void flush_outbox(void *ctx) {
   if (!s_out_pending) return;
@@ -94,7 +95,9 @@ static void flush_outbox(void *ctx) {
     if (s_out_val[0]) dict_write_cstring(it, s_out_key, s_out_val); else dict_write_uint8(it, s_out_key, 1);
     if (app_message_outbox_send() == APP_MSG_OK) { s_out_pending = false; return; }
   }
-  app_timer_register(150, flush_outbox, NULL);
+  // Give up after ~1.5 s (phone disconnected) instead of waking the watch forever.
+  if (++s_out_tries < 10) app_timer_register(150, flush_outbox, NULL);
+  else s_out_pending = false;
 }
 
 static void send_kv(uint32_t key, const char *str) {
@@ -102,6 +105,7 @@ static void send_kv(uint32_t key, const char *str) {
   s_out_key = key;
   strncpy(s_out_val, str ? str : "", sizeof(s_out_val) - 1);
   s_out_pending = true;
+  s_out_tries = 0;
   if (!waiting) flush_outbox(NULL);
 }
 

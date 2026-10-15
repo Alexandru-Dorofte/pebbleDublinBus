@@ -16,6 +16,7 @@ var indexError = '';
 var byCode = {};
 var here = null;          // {lat, lon}, 'off', or null while locating
 var current = null;       // stop code open on the watch
+var lastSent = '';        // last DATA sent, to skip identical updates (saves Bluetooth)
 var timetables = {};      // code -> stop file, for this session
 
 function store(k, v) {
@@ -154,12 +155,19 @@ function render() {
   })).join('\n');
 }
 
+function sendData() {
+  var data = render();
+  if (data === lastSent) return;
+  lastSent = data;
+  send({ DATA: data });
+}
+
 function refresh() {
   if (!current || !timetables[current]) return;
   if (feed && Date.now() - feedAt > STALE) feed = null;
   if (!key()) return send({ STATUS: 'Add your NTA API key in the app settings on your phone' });
   if (busy) return;
-  if (Date.now() - lastFetch < MIN_GAP) return send({ DATA: render() }); // recount minutes, no call
+  if (Date.now() - lastFetch < MIN_GAP) return sendData(); // recount minutes, no call
   busy = true;
   lastFetch = Date.now();
   store('lastFetch', String(lastFetch));
@@ -169,12 +177,13 @@ function refresh() {
     if (err === 401 || err === 403) return send({ STATUS: 'NTA API key rejected. Check settings' });
     if (err) console.log('NTA feed: ' + err); // keep the last good feed until STALE, then timetable only
     else { feed = dep.indexFeed(data); feedAt = Date.now(); }
-    send({ DATA: render() });
+    sendData();
   });
 }
 
 function open(code) {
   current = code;
+  lastSent = '';
   if (timetables[code]) return refresh();
   get(SITE + 's/' + code + '.json', {}, function (err, data) { // up to ~200 KB; kept in memory for this session
     if (current !== code) return;
@@ -189,7 +198,7 @@ function toggleFav(code) {
   if (i >= 0) f.splice(i, 1); else f.push(code);
   store('favs', JSON.stringify(f));
   var msg = { TOAST: i >= 0 ? 'Removed' : 'Saved' };
-  if (current === code && timetables[code]) msg.DATA = render();
+  if (current === code && timetables[code]) msg.DATA = lastSent = render();
   send(msg);
   sendHome();
 }
@@ -205,7 +214,7 @@ Pebble.addEventListener('appmessage', function (e) {
   var p = e.payload;
   if (p.OPEN !== undefined) open(String(p.OPEN));
   if (p.FAV !== undefined) toggleFav(String(p.FAV));
-  if (p.REFRESH !== undefined) refresh();
+  if (p.REFRESH !== undefined) { lastSent = ''; refresh(); } // watch shows "…" until it hears back
   if (p.CLOSE !== undefined) { current = null; locate(); } // back on the home screen: re-check location
 });
 
