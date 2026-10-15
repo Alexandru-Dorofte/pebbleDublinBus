@@ -4,11 +4,15 @@ var dep = require('./departures');
 var SITE = 'https://alexandru-dorofte.github.io/pebbleDublinBus/';
 var FEED_URL = 'https://api.nationaltransport.ie/gtfsr/v2/TripUpdates?format=json';
 var MIN_GAP = 61 * 1000; // NTA usage policy: at most one GTFS-R call per 60 s per key
-var NEARBY_M = 1000, NEARBY_MAX = 10;
+var NEARBY_M = 1000, NEARBY_MAX = 10, MAX_FAVS = 12;
+var TICK = 20 * 1000;     // recount minutes; MIN_GAP still limits API calls
+var STALE = 3 * 60 * 1000; // keep using the last good feed this long if a fetch fails
 var DEFAULT_FAVS = ['4766'];
 
-var feed = null, lastFetch = 0, busy = false;
+var feed = null, feedAt = 0, busy = false;
+var lastFetch = 0; // persisted in localStorage, so relaunching can't make two calls inside 60 s
 var index = null;         // [[code, name, lat, lon, routes], ...]
+var indexError = '';
 var byCode = {};
 var here = null;          // {lat, lon}, 'off', or null while locating
 var current = null;       // stop code open on the watch
@@ -33,8 +37,10 @@ function today() {
   return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
 }
 
-function send(msg) {
-  Pebble.sendAppMessage(msg, null, function () { console.log('send failed'); });
+function send(msg, retried) {
+  Pebble.sendAppMessage(msg, null, function () {
+    if (!retried) setTimeout(function () { send(msg, true); }, 500); // watch busy: one retry
+  });
 }
 
 function get(url, headers, done) {
@@ -60,7 +66,9 @@ function cached(name, done) {
     } catch (e) {}
   }
   get(SITE + name, {}, function (err, data) {
-    if (err) return done(err);
+    if (err) { // offline: an older copy beats nothing
+      try { return done(null, JSON.parse(hit).data); } catch (e) { return done(err); }
+    }
     store(k, JSON.stringify({ day: today(), data: data }));
     done(null, data);
   });
@@ -80,7 +88,7 @@ function dist(m) {
 
 function stopDist(code) {
   var s = byCode[code];
-  return s && here && here !== 'off' ? dist(metres(here, s[2], s[3])) : '';
+  return s && here && here.lat !== undefined ? dist(metres(here, s[2], s[3])) : '';
 }
 
 // Home list for the watch, one stop per line:
@@ -88,12 +96,15 @@ function stopDist(code) {
 // or "S \t state" for the Nearby section: loading | locating | off | none
 function sendHome() {
   var f = favs(), lines = [];
-  f.forEach(function (code) {
+  // Keep the message inside the watch's inbox: the watch shows ~40 chars of routes anyway.
+  var routes = function (r) { return r.length > 40 ? r.slice(0, 39) + '…' : r; };
+  f.slice(0, MAX_FAVS).forEach(function (code) {
     var s = byCode[code];
-    lines.push(['F', code, s ? s[1] : 'Stop ' + code, stopDist(code), s ? s[4] : '', 1].join('\t'));
+    lines.push(['F', code, s ? s[1] : 'Stop ' + code, stopDist(code), s ? routes(s[4]) : '', 1].join('\t'));
   });
-  if (!index) lines.push('S\tloading');
-  else if (here === 'off') lines.push('S\toff');
+  if (indexError) lines.push('S\t' + indexError);
+  else if (!index) lines.push('S\tloading');
+  else if (here === 'off' || here === 'nofix') lines.push('S\t' + here);
   else if (!here) lines.push('S\tlocating');
   else {
     var near = index.map(function (s) { return [metres(here, s[2], s[3]), s]; })
@@ -103,7 +114,7 @@ function sendHome() {
     if (!near.length) lines.push('S\tnone');
     near.forEach(function (p) {
       var s = p[1];
-      lines.push(['N', s[0], s[1], dist(p[0]), s[4], f.indexOf(s[0]) >= 0 ? 1 : 0].join('\t'));
+      lines.push(['N', s[0], s[1], dist(p[0]), routes(s[4]), f.indexOf(s[0]) >= 0 ? 1 : 0].join('\t'));
     });
   }
   send({ HOME: lines.join('\n') });
@@ -114,15 +125,18 @@ function locate() {
   navigator.geolocation.getCurrentPosition(function (p) {
     here = { lat: p.coords.latitude, lon: p.coords.longitude };
     sendHome();
-  }, function () {
-    here = 'off';
+  }, function (err) {
+    // Permission denied means location is off; a timeout keeps the last fix if we have one.
+    if (err && err.code === 1) here = 'off';
+    else if (!here || here === 'off') here = 'nofix';
     sendHome();
   }, { timeout: 15000, maximumAge: 60000 });
 }
 
 function loadIndex() {
   cached('stops.json', function (err, data) {
-    if (err) return send({ STATUS: 'Could not load the stop list. Check your phone\'s connection' });
+    indexError = err ? 'Could not load the stop list. Check your phone\'s connection' : '';
+    if (err) return sendHome();
     index = data;
     byCode = {};
     index.forEach(function (s) { byCode[s[0]] = s; });
@@ -142,24 +156,27 @@ function render() {
 
 function refresh() {
   if (!current || !timetables[current]) return;
+  if (feed && Date.now() - feedAt > STALE) feed = null;
   if (!key()) return send({ STATUS: 'Add your NTA API key in the app settings on your phone' });
   if (busy) return;
   if (Date.now() - lastFetch < MIN_GAP) return send({ DATA: render() }); // recount minutes, no call
   busy = true;
   lastFetch = Date.now();
+  store('lastFetch', String(lastFetch));
   get(FEED_URL, { 'x-api-key': key(), 'Cache-Control': 'no-cache' }, function (err, data) {
     busy = false;
+    if (!current || !timetables[current]) return; // user left, or the stop's timetable is still loading
     if (err === 401 || err === 403) return send({ STATUS: 'NTA API key rejected. Check settings' });
-    if (err) console.log('NTA feed: ' + err);
-    feed = err ? null : data; // on failure show the timetable rather than nothing
-    if (current) send({ DATA: render() });
+    if (err) console.log('NTA feed: ' + err); // keep the last good feed until STALE, then timetable only
+    else { feed = dep.indexFeed(data); feedAt = Date.now(); }
+    send({ DATA: render() });
   });
 }
 
 function open(code) {
   current = code;
   if (timetables[code]) return refresh();
-  get(SITE + 's/' + code + '.json', {}, function (err, data) { // ~10 KB; kept in memory only
+  get(SITE + 's/' + code + '.json', {}, function (err, data) { // up to ~200 KB; kept in memory for this session
     if (current !== code) return;
     if (err) return send({ STATUS: err === 404 ? 'No buses found for stop ' + code : 'Could not load the timetable' });
     timetables[code] = data;
@@ -171,15 +188,17 @@ function toggleFav(code) {
   var f = favs(), i = f.indexOf(code);
   if (i >= 0) f.splice(i, 1); else f.push(code);
   store('favs', JSON.stringify(f));
-  send({ TOAST: i >= 0 ? 'Removed' : 'Saved' });
-  if (current === code && timetables[code]) send({ DATA: render() });
+  var msg = { TOAST: i >= 0 ? 'Removed' : 'Saved' };
+  if (current === code && timetables[code]) msg.DATA = render();
+  send(msg);
   sendHome();
 }
 
 Pebble.addEventListener('ready', function () {
+  lastFetch = +store('lastFetch') || 0;
   loadIndex();
   locate();
-  setInterval(refresh, MIN_GAP);
+  setInterval(refresh, TICK);
 });
 
 Pebble.addEventListener('appmessage', function (e) {
@@ -187,8 +206,7 @@ Pebble.addEventListener('appmessage', function (e) {
   if (p.OPEN !== undefined) open(String(p.OPEN));
   if (p.FAV !== undefined) toggleFav(String(p.FAV));
   if (p.REFRESH !== undefined) refresh();
-  if (p.CLOSE !== undefined) current = null;
-  if (p.HOME !== undefined) locate(); // back on the home screen: re-check location
+  if (p.CLOSE !== undefined) { current = null; locate(); } // back on the home screen: re-check location
 });
 
 Pebble.addEventListener('showConfiguration', function () {
@@ -211,7 +229,7 @@ Pebble.addEventListener('showConfiguration', function () {
     '<p>The number is on the stop\'s pole and in the TFI Live app.</p>' +
     '<button class="save" onclick="save()">Save to watch</button>' +
     '<p>Data: National Transport Authority, CC BY 4.0, provided as is.</p></main><script>' +
-    'var favs=' + JSON.stringify(list).replace(/</g, '\\u003c') + ';' +
+    'var favs=' + JSON.stringify(list).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029') + ';' +
     'function e(s){return String(s).replace(/[&<>"\']/g,function(c){return "&#"+c.charCodeAt(0)+";"})}' +
     'function draw(){document.getElementById("favs").innerHTML=favs.map(function(f,i){return "<div class=row><div><b>"+e(f.name||"Stop "+f.code)+"</b><small>"+e(f.code)+(f.routes?" · "+e(f.routes):"")+"</small></div><button class=rm onclick=\\"rm("+i+")\\">Remove</button></div>"}).join("")||"<p>No favourites yet.</p>"}' +
     'function rm(i){favs.splice(i,1);draw()}' +

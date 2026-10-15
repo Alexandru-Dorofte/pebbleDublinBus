@@ -52,6 +52,25 @@ assert.deepStrictEqual(rows, [
   ['N4', '', '45 min', true],
 ]);
 
+// No feed at all (fetch failed): timetable only, no crash.
+assert.strictEqual(dep.forStop(data, stop, null, now).every(function (b) { return !b.live; }), true);
+
+// ADDED entry that is really a timetabled trip: shown once, with its absolute time.
+var dupFeed = { entity: [tu(undefined, 'ADDED', [{ stop_sequence: 10, stop_id: 'S1', departure: { time: String((now + 7 * 60000) / 1000) } }],
+  { route_id: '1 39A', direction_id: 0, start_time: '07:30:00' })] };
+var d = dep.forStop(data, { id: 'S1', trips: [stop.trips[0]] }, dupFeed, now);
+assert.deepStrictEqual(d.map(function (b) { return [b.route, dep.due(b.ms, now), b.live]; }), [['39A', '7 min', true]]);
+
+// Delay propagates past a SKIPPED earlier stop; another day's trip_id update is ignored.
+var p2 = { entity: [tu('prop', 0, [{ stop_sequence: 12, arrival: { delay: 300 } }, { stop_sequence: 15, schedule_relationship: 'SKIPPED' }]),
+  tu('sched', 'CANCELED', [], { start_date: '20261014' })] };
+var r2 = dep.forStop(data, { id: 'S1', trips: [stop.trips[0], stop.trips[2]] }, p2, now);
+assert.deepStrictEqual(r2.map(function (b) { return [b.route, dep.due(b.ms, now), b.live]; }), [['39A', '5 min', false], ['C1', '17 min', true]]);
+
+// A bus running 70 min late still shows.
+var late = { entity: [tu('gone', 0, [{ stop_sequence: 10, departure: { delay: 70 * 60 } }])] };
+assert.strictEqual(dep.due(dep.forStop(data, { id: 'S1', trips: [stop.trips[9]] }, late, now)[0].ms, now), '10 min');
+
 // Night bus timetabled as 24:30 on yesterday's service day.
 var night = new Date(2026, 9, 15, 0, 20, 0).getTime();
 var n = dep.forStop(data, { id: 'S1', trips: [[T('24:30'), 0, 0, 'a', 'n', 1, '24:00:00', 0]] }, { entity: [] }, night);

@@ -13,8 +13,7 @@
     "sdkVersion": "3",
     "enableMultiJS": true,
     "targetPlatforms": [
-      "emery",
-      "gabbro"
+      "emery"
     ],
     "watchapp": {
       "watchface": false
@@ -23,11 +22,11 @@
       "DATA",
       "STATUS",
       "REFRESH",
-      "HOME",
       "OPEN",
       "FAV",
       "CLOSE",
-      "TOAST"
+      "TOAST",
+      "HOME"
     ],
     "resources": {
       "media": [
