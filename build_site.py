@@ -78,9 +78,14 @@ def build(z, today):
             st['calls'].append((secs(r['departure_time']), t, seq))
 
     files, index = {}, []
+    # A few stop codes belong to several stop_ids; keep the busiest one.
+    best = {}
     for stop_id, st in stops.items():
-        if not st['calls']:
-            continue
+        kept = best.get(st['code'])
+        if st['calls'] and (kept is None or len(st['calls']) > len(stops[kept]['calls'])):
+            best[st['code']] = stop_id
+    for stop_id in best.values():
+        st = stops[stop_id]
         routes, heads, sids, out = [], [], set(), []
         for dep, t, seq in sorted(st['calls']):
             route_id, sid, head, d = trips[t]
@@ -104,7 +109,9 @@ def build(z, today):
 
 def write(index, files, out):
     os.makedirs(os.path.join(out, 's'), exist_ok=True)
-    dump = lambda obj, path: json.dump(obj, open(path, 'w'), separators=(',', ':'), ensure_ascii=False)
+    def dump(obj, path):
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(obj, f, separators=(',', ':'), ensure_ascii=False)
     dump(index, os.path.join(out, 'stops.json'))
     for code, data in files.items():
         dump(data, os.path.join(out, 's', code + '.json'))
