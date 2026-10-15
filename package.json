@@ -22,7 +22,12 @@
     "messageKeys": [
       "DATA",
       "STATUS",
-      "REFRESH"
+      "REFRESH",
+      "HOME",
+      "OPEN",
+      "FAV",
+      "CLOSE",
+      "TOAST"
     ],
     "resources": {
       "media": [
@@ -35,7 +40,8 @@
       ]
     },
     "capabilities": [
-      "configurable"
+      "configurable",
+      "location"
     ]
   }
 }

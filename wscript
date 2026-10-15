@@ -3,7 +3,6 @@
 #
 # Feel free to customize this to your needs.
 #
-import json
 import os.path
 
 top = '.'
@@ -26,17 +25,6 @@ def configure(ctx):
 
 def build(ctx):
     ctx.load('pebble_sdk')
-
-    # Bake NTA_API_KEY from .env (gitignored) into the phone JS.
-    root = ctx.path.abspath()
-    env = {}
-    if os.path.exists(os.path.join(root, '.env')):
-        for line in open(os.path.join(root, '.env')):
-            k, _, v = line.strip().partition('=')
-            if k and not k.startswith('#'):
-                env[k.strip()] = v.strip().strip('"\'')
-    with open(os.path.join(root, 'src/pkjs/env.json'), 'w') as f:
-        json.dump({'apiKey': env.get('NTA_API_KEY', '')}, f)
 
     build_worker = os.path.exists('worker_src')
     binaries = []
